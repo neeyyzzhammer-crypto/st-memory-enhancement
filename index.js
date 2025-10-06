@@ -148,7 +148,7 @@ async function applyShortTermMemoryWindow(nOverride) {
 
         // Collect assistant indices
         const assistantIdx = [];
-        for (let i = 0; i < chat.length; i++) {
+        for (let i = chat.length-1; i >= 0; i--) {
             if (chat[i] && chat[i].is_user === false) assistantIdx.push(i);
         }
 
