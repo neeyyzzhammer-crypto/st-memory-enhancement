@@ -436,27 +436,35 @@ function __buildThinkingPromptOverride(latestSection) {
     }
 }
 
-// Enhanced handler replacing plain version
+// REPLACE the existing onChatCompletionPromptReady with the original (restored) behavior
+
 async function onChatCompletionPromptReady(eventData) {
     try {
-        // Step-by-step mode stays earliest to avoid extra injection
+        // Step-by-step mode: ONLY inject a single read-only table snapshot (old behavior), then exit
         if (USER.tableBaseSetting.step_by_step === true) {
             if (USER.tableBaseSetting.isExtensionAble === true &&
                 USER.tableBaseSetting.isAiReadTable === true &&
                 USER.tableBaseSetting.injection_mode !== "injection_off") {
-                const tableData = getTablePrompt(eventData, true);
+
+                const tableData = getTablePrompt(eventData, true); // pure data (title + headers + rows)
                 if (tableData) {
-                    const finalPrompt = `以下是通过表格记录的当前场景信息以及历史记录信息，你需要以此为参考进行思考：\n${tableData}`;
+                    const finalPrompt =
+                        `以下是通过表格记录的当前场景信息以及历史记录信息，你需要以此为参考进行思考：\n${tableData}`;
                     if (USER.tableBaseSetting.deep === 0) {
                         eventData.chat.push({ role: getMesRole(), content: finalPrompt });
                     } else {
-                        eventData.chat.splice(-USER.tableBaseSetting.deep, 0, { role: getMesRole(), content: finalPrompt });
+                        eventData.chat.splice(
+                            -USER.tableBaseSetting.deep,
+                            0,
+                            { role: getMesRole(), content: finalPrompt }
+                        );
                     }
                 }
             }
-            return;
+            return; // (Old logic) Do NOT inject message_template or thinking_template in step-by-step mode
         }
 
+        // Guard conditions (unchanged from original)
         if (eventData.dryRun === true ||
             USER.tableBaseSetting.isExtensionAble === false ||
             USER.tableBaseSetting.isAiReadTable === false ||
@@ -464,53 +472,34 @@ async function onChatCompletionPromptReady(eventData) {
             return;
         }
 
-        const shortWindow = USER.tableBaseSetting.short_term_memory ?? 2;
-        const ctWindow = USER.tableBaseSetting.critical_thinking_memory ?? 1;
-
-        const fullChat = eventData.chat; // UI kept
-        const ctSections = __collectLastCriticalThinkingSections(fullChat, ctWindow);
-        const latestCT = ctSections.length ? ctSections[ctSections.length - 1] : '';
-
-        // Build trimmed conversation only for model
-        let modelConversation = shortWindow > 0 ? fullChat.slice(-shortWindow) : [...fullChat];
-        modelConversation = modelConversation.map(msg => {
-            if (!msg) return msg;
-            if (msg.content !== undefined) {
-                return { ...msg, content: __stripCriticalThinkingBlocks(msg.content) };
-            } else if (msg.mes !== undefined) {
-                return { ...msg, mes: __stripCriticalThinkingBlocks(msg.mes) };
-            }
-            return msg;
-        });
-
-        eventData.chat = modelConversation;
-
+        // Original simple behavior: build thinking + message templates and inject together
+        const thinkingContent = initThinkingData(eventData); // thinking_template (with <previous_thinking>)
+        const promptContent = initTableData(eventData);      // message_template (with {{tableData}} substitution)
         const role = getMesRole();
+        const inserts = [];
 
-        if (ctSections.length) {
-            eventData.chat.push({
-                role,
-                content: ctSections.join('\n')
-            });
+        if (thinkingContent && thinkingContent.trim().length > 0) {
+            inserts.push({ role, content: thinkingContent });
+        }
+        if (promptContent && promptContent.trim().length > 0) {
+            inserts.push({ role, content: promptContent });
         }
 
-        const thinkingContent = __buildThinkingPromptOverride(latestCT);
-        if (thinkingContent && thinkingContent.trim()) {
-            eventData.chat.push({ role, content: thinkingContent });
+        if (inserts.length > 0) {
+            if (USER.tableBaseSetting.deep === 0) {
+                eventData.chat.push(...inserts);
+            } else {
+                eventData.chat.splice(-USER.tableBaseSetting.deep, 0, ...inserts);
+            }
         }
 
-        const promptContent = initTableData(eventData);
-        if (promptContent && promptContent.trim()) {
-            eventData.chat.push({ role, content: promptContent });
-        }
-
-        updateSystemMessageTableStatus();
+        // Keep legacy sheet/status refresh
+        updateSheetsView();
     } catch (error) {
         EDITOR.error(`记忆插件：表格数据注入失败\n原因：`, error.message, error);
     }
-    console.log("最终发送给模型的消息", eventData.chat);
+    console.log("注入表格总体提示词 + 思考提示词 (restored legacy behavior)", eventData.chat);
 }
-
 /**
  * 宏获取提示词
  */
