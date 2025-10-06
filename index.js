@@ -17,7 +17,7 @@ import { Cell } from "./core/table/cell.js";
 
 console.log("______________________记忆插件：开始加载______________________")
 
-const VERSION = '2.2.0'
+const VERSION = '3.2.0'
 
 const editErrorInfo = {
     forgotCommentTag: false,
