@@ -130,36 +130,56 @@ export function convertOldTablesToNewSheets(oldTableList, targetPiece) {
  * When n <= 0 all messages are shown.
  * @param {number} [nOverride] Optional override (used when user changes setting)
  */
+// PATCH: revise short-term memory logic to keep ONLY the last N assistant messages (+ their paired user msgs) visible.
+// N now counts ASSISTANT messages. We reveal all messages from the earliest of those N assistant messages onward.
+// If messages are strictly user/assistant alternating, this approximates showing the last 2N turns.
+// Everything before that point is hidden. If N <= 0 => show all.
 async function applyShortTermMemoryWindow(nOverride) {
     try {
-        const n = typeof nOverride === 'number'
+        const rawN = typeof nOverride === 'number'
             ? nOverride
             : (parseInt(USER.tableBaseSetting.short_term_memory) || 0);
 
         const chat = USER.getContext()?.chat || [];
         if (!Array.isArray(chat) || chat.length === 0) return;
 
-        // Show all if window disabled
-        if (n <= 0) {
-            const unhidePromises = [];
-            for (let i = 0; i < chat.length; i++) {
-                // false => unhide
-                unhidePromises.push(hideChatMessageRange(i, i, false));
-            }
-            await Promise.all(unhidePromises);
+        // N <= 0 => unhide all
+        if (rawN <= 0) {
+            const unhideAll = chat.map((_, i) => hideChatMessageRange(i, i, false));
+            await Promise.all(unhideAll);
             return;
         }
 
-        const startVisible = Math.max(0, chat.length - n);
-        const promises = [];
-
+        // Collect indices of assistant messages
+        const assistantIndices = [];
         for (let i = 0; i < chat.length; i++) {
-            const shouldHide = i < startVisible;
+            const m = chat[i];
+            if (m && m.is_user === false) assistantIndices.push(i);
+        }
+
+        // Not enough assistant messages to trim => show all
+        if (assistantIndices.length <= rawN) {
+            const unhideAll = chat.map((_, i) => hideChatMessageRange(i, i, false));
+            await Promise.all(unhideAll);
+            return;
+        }
+
+        // Determine the indices of the last rawN assistant messages
+        const keepAssistant = assistantIndices.slice(-rawN);
+        const earliestKeepAssistantIndex = keepAssistant[0];
+
+        // Option: expand window to approximate "double" (include paired user turns)
+        // If there are earlier user messages immediately preceding earliest assistant kept,
+        // we still hide them per requirement ("apply hidden to everything outside last N assistant messages").
+        // Thus we hide strictly messages with index < earliestKeepAssistantIndex.
+        const promises = [];
+        for (let i = 0; i < chat.length; i++) {
+            const shouldHide = i < earliestKeepAssistantIndex;
             promises.push(hideChatMessageRange(i, i, shouldHide));
         }
         await Promise.all(promises);
     } catch (e) {
-        console.warn('[ShortTermMemory] Failed applying memory window:', e);
+        console.warn('[ShortTermMemory] Failed applying memory window (assistant-based):', e);
     }
 }
 function addOldTablePrompt(sheet) {
