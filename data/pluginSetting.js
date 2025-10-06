@@ -120,6 +120,8 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
 
     // NEW: Short-term memory message window (number of recent messages kept in prompt)
     short_term_memory: 2,
+    critical_thinking_memory: 1,          // NEW: how many past <critical_thinking> sections to include separately
+
     /**
      * ===========================
      * 注入设置

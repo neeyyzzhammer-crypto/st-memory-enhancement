@@ -336,6 +336,35 @@ function ensureShortTermMemoryField() {
     console.log('[Short-term memory] Field injected below depth field.');
 }
 
+function ensureCriticalThinkingMemoryField() {
+    if ($('#dataTable_critical_thinking_memory').length) {
+        $('#dataTable_critical_thinking_memory').val(USER.tableBaseSetting.critical_thinking_memory ?? 1);
+        return;
+    }
+    const $stmRow = $('.short-term-memory-row');
+    if (!$stmRow.length) return;
+
+    const $newRow = $(`
+        <div class="critical-thinking-memory-row" style="
+            display:flex;
+            align-items:center;
+            gap:8px;
+            margin-top:6px;
+            width:100%;
+            flex-basis:100%;
+        ">
+            <label for="dataTable_critical_thinking_memory" style="white-space:nowrap;">Critical-thinking memory</label>
+            <input id="dataTable_critical_thinking_memory"
+                   type="number"
+                   min="0"
+                   class="text_pole"
+                   style="max-width:140px;"
+                   value="${USER.tableBaseSetting.critical_thinking_memory ?? 1}" />
+        </div>
+    `);
+    $stmRow.after($newRow);
+}
+
 function InitBinging() {
     console.log('初始化绑定')
     // 开始绑定事件
@@ -520,6 +549,13 @@ function InitBinging() {
         USER.tableBaseSetting.short_term_memory = v;
         USER.saveSettings && USER.saveSettings();
     });
+    $(document).off('input.criticalThinkingMemory').on('input.criticalThinkingMemory', '#dataTable_critical_thinking_memory', function () {
+        let v = parseInt(this.value, 10);
+        if (isNaN(v) || v < 0) v = 0;
+        this.value = v;
+        USER.tableBaseSetting.critical_thinking_memory = v;
+        USER.saveSettings && USER.saveSettings();
+    });
     // 分步填表提示词
     $('#step_by_step_user_prompt').on('input', function() {
         USER.tableBaseSetting.step_by_step_user_prompt = $(this).val();
@@ -624,13 +660,10 @@ export function renderSetting() {
     $('#dataTable_message_template').val(USER.tableBaseSetting.message_template);
     
     $('#dataTable_deep').val(USER.tableBaseSetting.deep);
-
-    // Inject (or update) the short-term memory row BELOW the depth input
     ensureShortTermMemoryField();
-
-    // Sync value again just in case
+    ensureCriticalThinkingMemoryField();
     $('#dataTable_short_term_memory').val(USER.tableBaseSetting.short_term_memory ?? 2);
-
+    $('#dataTable_critical_thinking_memory').val(USER.tableBaseSetting.critical_thinking_memory ?? 1);
 
     $('#clear_up_stairs').val(USER.tableBaseSetting.clear_up_stairs);
     $('#clear_up_stairs_value').text(USER.tableBaseSetting.clear_up_stairs);
@@ -711,6 +744,10 @@ export function loadSettings() {
     // 如果缺少新设置的默认值，则初始化
     if (typeof USER.tableBaseSetting.short_term_memory !== 'number') {
         USER.tableBaseSetting.short_term_memory = 2;
+    }
+
+    if (typeof USER.tableBaseSetting.critical_thinking_memory !== 'number') {
+        USER.tableBaseSetting.critical_thinking_memory = 1;
     }
 
     if (USER.tableBaseSetting.deep < 0) formatDeep();

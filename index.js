@@ -545,50 +545,6 @@ function getMesRole() {
 // REPLACE the existing onChatCompletionPromptReady with this updated version
 async function onChatCompletionPromptReady(eventData) {
     try {
-        // Short-term memory trimming BEFORE any injection (only if enabled & >0)
-        const stm = USER.tableBaseSetting.short_term_memory ?? 2;
-        if (stm > 0 && Array.isArray(eventData.chat)) {
-            // Keep last stm messages only (do not include system-injected ones yet)
-            if (eventData.chat.length > stm) {
-                const removedCount = eventData.chat.length - stm;
-                // Attempt to hide older messages in UI / system so they are excluded from model prompt
-                try {
-                    const contextChat = USER.getContext().chat || [];
-                    const lastIdx = contextChat.length - 1;
-                    const firstKeptGlobalIndex = lastIdx - (stm - 1);
-                    const promises = [];
-                    for (let i = 0; i < firstKeptGlobalIndex; i++) {
-                        // Hide each old message (best-effort)
-                        promises.push(hideChatMessageRange(i, i, true));
-                    }
-                    if (promises.length) await Promise.allSettled(promises);
-                } catch (e) {
-                    console.warn('[Short-term memory] hideChatMessageRange failed or unavailable:', e);
-                }
-                // Trim prompt array itself
-                eventData.chat = eventData.chat.slice(-stm);
-                console.log(`[Short-term memory] Trimmed prompt messages. Removed: ${removedCount}, Kept: ${stm}`);
-            }
-        }
-
-        // Step-by-step logic (unchanged except executed after STM trim)
-        if (USER.tableBaseSetting.step_by_step === true) {
-            if (USER.tableBaseSetting.isExtensionAble === true &&
-                USER.tableBaseSetting.isAiReadTable === true &&
-                USER.tableBaseSetting.injection_mode !== "injection_off") {
-                const tableData = getTablePrompt(eventData, true);
-                if (tableData) {
-                    const finalPrompt = `以下是通过表格记录的当前场景信息以及历史记录信息，你需要以此为参考进行思考：\n${tableData}`;
-                    const insertionIndex = USER.tableBaseSetting.deep === 0
-                        ? eventData.chat.length
-                        : Math.max(0, eventData.chat.length - USER.tableBaseSetting.deep);
-                    eventData.chat.splice(insertionIndex, 0, { role: getMesRole(), content: finalPrompt });
-                    console.log("分步填表模式：注入只读表格数据", eventData.chat);
-                }
-            }
-            return;
-        }
-
         if (eventData.dryRun === true ||
             USER.tableBaseSetting.isExtensionAble === false ||
             USER.tableBaseSetting.isAiReadTable === false ||
@@ -596,295 +552,129 @@ async function onChatCompletionPromptReady(eventData) {
             return;
         }
 
-        console.log("生成提示词前", USER.getContext().chat);
+        const shortWindow = USER.tableBaseSetting.short_term_memory ?? 2;
+        const ctWindow = USER.tableBaseSetting.critical_thinking_memory ?? 1;
 
-        const thinkingContent = initThinkingData(eventData);
-        const promptContent = initTableData(eventData);
+        // Keep a reference to the full original chat (UI stays untouched)
+        const fullChatForUI = eventData.chat;
+
+        // Collect critical thinking sections from the full chat BEFORE filtering
+        const criticalSections = collectLastCriticalThinkingSectionsForPatch(fullChatForUI, ctWindow);
+        const latestCritical = criticalSections.length
+            ? criticalSections[criticalSections.length - 1]
+            : '';
+
+        // Build the reduced conversation ONLY for the model
+        // Do NOT mutate source message objects; create shallow copies with stripped content
+        let modelConversation = shortWindow > 0
+            ? fullChatForUI.slice(-shortWindow)
+            : [...fullChatForUI];
+
+        modelConversation = modelConversation.map(msg => {
+            // Normalize formats (SillyTavern vs OpenAI style)
+            if (msg.content !== undefined) {
+                // OpenAI-style
+                return {
+                    ...msg,
+                    content: stripCriticalThinkingBlocksForPatch(msg.content)
+                };
+            } else if (msg.mes !== undefined) {
+                // SillyTavern internal style
+                return {
+                    ...msg,
+                    mes: stripCriticalThinkingBlocksForPatch(msg.mes)
+                };
+            }
+            return msg;
+        });
+
+        // Replace eventData.chat ONLY for the outbound prompt
+        eventData.chat = modelConversation;
+
+        // Step-by-step branch (unchanged semantics; still inject table-only context)
+        if (USER.tableBaseSetting.step_by_step === true) {
+            const tableData = getTablePrompt(eventData, true);
+            if (tableData) {
+                const finalPrompt = `以下是通过表格记录的当前场景信息以及历史记录信息，你需要以此为参考进行思考：\n${tableData}`;
+                if (USER.tableBaseSetting.deep === 0) {
+                    eventData.chat.push({ role: getMesRole(), content: finalPrompt });
+                } else {
+                    eventData.chat.splice(
+                        Math.max(0, eventData.chat.length - USER.tableBaseSetting.deep),
+                        0,
+                        { role: getMesRole(), content: finalPrompt }
+                    );
+                }
+            }
+            return;
+        }
+
+        // Standard mode injection ordering:
+        // 1) Aggregated critical thinking history (if any)
+        // 2) thinking_template (with <previous_thinking> replaced by latest)
+        // 3) message_template (table data)
         const role = getMesRole();
-        const inserts = [];
 
-        if (thinkingContent && thinkingContent.trim().length > 0) {
-            inserts.push({ role, content: thinkingContent });
-        }
-        if (promptContent && promptContent.trim().length > 0) {
-            inserts.push({ role, content: promptContent });
+        if (criticalSections.length) {
+            eventData.chat.push({
+                role,
+                content: criticalSections.join('\n')
+            });
         }
 
-        if (inserts.length > 0) {
-            const insertionIndex = USER.tableBaseSetting.deep === 0
-                ? eventData.chat.length
-                : Math.max(0, eventData.chat.length - USER.tableBaseSetting.deep);
-            eventData.chat.splice(insertionIndex, 0, ...inserts);
+        const thinkingContent = initThinkingDataPatched(latestCritical);
+        if (thinkingContent && thinkingContent.trim()) {
+            eventData.chat.push({ role, content: thinkingContent });
+        }
+
+        const promptContent = initTableData(eventData);
+        if (promptContent && promptContent.trim()) {
+            eventData.chat.push({ role, content: promptContent });
         }
 
         updateSheetsView();
     } catch (error) {
         EDITOR.error(`记忆插件：表格数据注入失败\n原因：`, error.message, error);
     }
-    console.log("注入表格总体提示词 + 思考提示词 (含短期记忆裁剪)", eventData.chat);
+    console.log("最终发送给LLM的消息（UI未受影响）:", eventData.chat);
 }
 
-/**
-  * 宏获取提示词
-  */
-function getMacroPrompt() {
-    try {
-        if (USER.tableBaseSetting.isExtensionAble === false || USER.tableBaseSetting.isAiReadTable === false) return ""
-        if (USER.tableBaseSetting.step_by_step === true) {
-            const promptContent = replaceUserTag(getTablePrompt(undefined, true))
-            return `以下是通过表格记录的当前场景信息以及历史记录信息，你需要以此为参考进行思考：\n${promptContent}`
-        }
-        const promptContent = initTableData()
-        return promptContent
-    }catch (error) {
-        EDITOR.error(`记忆插件：宏提示词注入失败\n原因：`, error.message, error);
-        return ""
-    }
+// === Helper functions used by the patched handler ===
+// (Place them near existing helpers to avoid duplication)
+
+function stripCriticalThinkingBlocksForPatch(text) {
+    if (typeof text !== 'string') return text;
+    return text.replace(/<critical_thinking>[\s\S]*?<\/critical_thinking>/gi, '').trim();
 }
 
-/**
-  * 宏获取表格提示词
-  */
-function getMacroTablePrompt() {
-    try {
-        if (USER.tableBaseSetting.isExtensionAble === false || USER.tableBaseSetting.isAiReadTable === false) return ""
-        if(USER.tableBaseSetting.step_by_step === true){
-            const promptContent = replaceUserTag(getTablePrompt(undefined, true))
-            return promptContent
-        }
-        const promptContent = replaceUserTag(getTablePrompt())
-        return promptContent
-    }catch (error) {
-        EDITOR.error(`记忆插件：宏提示词注入失败\n原因：`, error.message, error);
-        return ""
-    }
-}
-
-/**
- * 去掉编辑指令两端的空格和注释标签
- * @param {string} str 输入的编辑指令字符串
- * @returns
- */
-function trimString(str) {
-    const str1 = str.trim()
-    if (!str1.startsWith("<!--") || !str1.endsWith("-->")) {
-        editErrorInfo.forgotCommentTag = true
-    }
-    return str1
-        .replace(/^\s*<!--|-->?\s*$/g, "")
-        .trim()
-}
-
-/**
- * 获取表格的tableEdit标签内的内容
- * @param {string} mes 消息正文字符串
- * @returns {matches} 匹配到的内容数组
- */
-
-export function getTableEditTag(mes) {
-    const regex = /<tableEdit>(.*?)<\/tableEdit>/gs;
-    const matches = [];
-    let match;
-    while ((match = regex.exec(mes)) !== null) {
-        matches.push(match[1]);
-    }
-    const updatedText = mes.replace(regex, "");
-    return { matches }
-}
-
-// ADD: helper to extract the latest <critical_thinking> section
-function getLatestAssistantCriticalThinkingSection() {
-    try {
-        const chat = USER.getContext().chat || [];
-        for (let i = chat.length - 1; i >= 0; i--) {
-            const c = chat[i];
-            if (c && c.is_user === false && typeof c.mes === 'string') {
-                const match = c.mes.match(/<critical_thinking>[\s\S]*?<\/critical_thinking>/i);
-                if (match && match[0]) {
-                    return match[0]; // return the whole section including tags
-                }
+function collectLastCriticalThinkingSectionsForPatch(chatArr, count) {
+    if (count <= 0) return [];
+    const collected = [];
+    for (let i = chatArr.length - 1; i >= 0 && collected.length < count; i--) {
+        const c = chatArr[i];
+        if (!c || c.is_user) continue;
+        const body = typeof c.content === 'string' ? c.content : (typeof c.mes === 'string' ? c.mes : '');
+        if (!body) continue;
+        const matches = body.match(/<critical_thinking>[\s\S]*?<\/critical_thinking>/gi);
+        if (matches) {
+            for (let j = matches.length - 1; j >= 0 && collected.length < count; j--) {
+                collected.push(matches[j]);
             }
         }
-    } catch (e) {
-        console.error('Failed to extract latest <critical_thinking> section:', e);
     }
-    return '';
+    return collected.reverse();
 }
 
-// ADD: build thinking prompt from settings, replacing <previous_thinking>
-function initThinkingData(eventData) {
+function initThinkingDataPatched(previousCriticalSection) {
     try {
         let tpl = USER.tableBaseSetting?.thinking_template || '';
         if (!tpl || typeof tpl !== 'string') return '';
-        const prev = getLatestAssistantCriticalThinkingSection();
-        const replaced = tpl.replace('<previous_thinking>', prev);
-        const promptContent = replaceUserTag(replaced);
-        return promptContent;
+        const replaced = tpl.replace('<previous_thinking>', previousCriticalSection || '');
+        return replaceUserTag(replaced);
     } catch (error) {
         EDITOR.error('记忆插件：思考提示词注入失败\n原因：', error.message, error);
         return '';
     }
-}
-
-/**
- * 消息编辑时触发
- * @param this_edit_mes_id 此消息的ID
- */
-async function onMessageEdited(this_edit_mes_id) {
-    if (USER.tableBaseSetting.isExtensionAble === false || USER.tableBaseSetting.step_by_step === true) return
-    const chat = USER.getContext().chat[this_edit_mes_id]
-    if (chat.is_user === true || USER.tableBaseSetting.isAiWriteTable === false) return
-    try {
-        handleEditStrInMessage(chat, parseInt(this_edit_mes_id))
-    } catch (error) {
-        EDITOR.error("记忆插件：表格编辑失败\n原因：", error.message, error)
-    }
-    updateSheetsView()
-}
-
-/**
- * 消息接收时触发
- * @param {number} chat_id 此消息的ID
- */
-async function onMessageReceived(chat_id) {
-    if (USER.tableBaseSetting.isExtensionAble === false) return
-    if (USER.tableBaseSetting.step_by_step === true && USER.getContext().chat.length > 2) {
-        TableTwoStepSummary("auto");  // 请勿使用await，否则会导致主进程阻塞引起的连锁bug
-    } else {
-        if (USER.tableBaseSetting.isAiWriteTable === false) return
-        const chat = USER.getContext().chat[chat_id];
-        console.log("收到消息", chat_id)
-        try {
-            handleEditStrInMessage(chat)
-        } catch (error) {
-            EDITOR.error("记忆插件：表格自动更改失败\n原因：", error.message, error)
-        }
-    }
-
-    updateSheetsView()
-}
-
-/**
- * 解析字符串中所有 {{GET::...}} 宏
- * @param {string} text - 需要解析的文本
- * @returns {string} - 解析并替换宏之后的文本
- */
-function resolveTableMacros(text) {
-    if (typeof text !== 'string' || !text.includes('{{GET::')) {
-        return text;
-    }
-
-    return text.replace(/{{GET::\s*([^:]+?)\s*:\s*([A-Z]+\d+)\s*}}/g, (match, tableName, cellAddress) => {
-        const sheets = BASE.getChatSheets();
-        const targetTable = sheets.find(t => t.name.trim() === tableName.trim());
-
-        if (!targetTable) {
-            return `<span style="color: red">[GET: 未找到表格 "${tableName}"]</span>`;
-        }
-
-        try {
-            const cell = targetTable.getCellFromAddress(cellAddress);
-            const cellValue = cell ? cell.data.value : undefined;
-            return cellValue !== undefined ? cellValue : `<span style="color: orange">[GET: 在 "${tableName}" 中未找到单元格 "${cellAddress}"]</span>`;
-        } catch (error) {
-            console.error(`Error resolving GET macro for ${tableName}:${cellAddress}`, error);
-            return `<span style="color: red">[GET: 处理时出错]</span>`;
-        }
-    });
-}
-
-/**
- * 聊天变化时触发
- */
-async function onChatChanged() {
-    try {
-        // 更新表格视图
-        updateSheetsView();
-
-        // 在聊天消息中渲染宏
-        document.querySelectorAll('.mes_text').forEach(mes => {
-            if (mes.dataset.macroProcessed) return;
-
-            const originalHtml = mes.innerHTML;
-            const newHtml = resolveTableMacros(originalHtml);
-
-            if (originalHtml !== newHtml) {
-                mes.innerHTML = newHtml;
-                mes.dataset.macroProcessed = true;
-            }
-        });
-
-    } catch (error) {
-        EDITOR.error("记忆插件：处理聊天变更失败\n原因：", error.message, error)
-    }
-}
-
-
-/**
- * 滑动切换消息事件
- */
-async function onMessageSwiped(chat_id) {
-    if (USER.tableBaseSetting.isExtensionAble === false || USER.tableBaseSetting.isAiWriteTable === false) return
-    const chat = USER.getContext().chat[chat_id];
-    console.log("滑动切换消息", chat)
-    if (!chat.swipe_info[chat.swipe_id]) return
-    try {
-        handleEditStrInMessage(chat)
-    } catch (error) {
-        EDITOR.error("记忆插件：swipe切换失败\n原因：", error.message, error)
-    }
-
-    updateSheetsView()
-}
-
-/**
- * 恢复指定层数的表格
- */
-export async function undoSheets(deep) {
-    const {piece, deep:findDeep} = BASE.getLastSheetsPiece(deep)
-    if(findDeep === -1) return 
-    console.log("撤回表格数据", piece, findDeep)
-    handleEditStrInMessage(piece, findDeep, true)
-    updateSheetsView()
-}
-
-/**
- * 更新新表格视图
- * @description 更新表格视图，使用新的Sheet系统
- * @returns {Promise<*[]>}
- */
-async function updateSheetsView(mesId) {
-    try{
-       // 刷新表格视图
-        console.log("========================================\n更新表格视图")
-        refreshTempView(true)
-        console.log("========================================\n更新表格内容视图")
-        BASE.refreshContextView(mesId)
-
-        // 更新系统消息中的表格状态
-        updateSystemMessageTableStatus(); 
-    }catch (error) {
-        EDITOR.error("记忆插件：更新表格视图失败\n原因：", error.message, error)
-    }
-}
-
-/**
- * 打开表格drawer
- */
-export function openDrawer() {
-    const drawer = $('#table_database_settings_drawer .drawer-toggle')
-    if (isDrawerNewVersion()) {
-        applicationFunctionManager.doNavbarIconClick.call(drawer)
-    }else{
-        return openAppHeaderTableDrawer()
-    }
-}
-
-/**
- * 获取是新版还是旧版drawer
- */
-export function isDrawerNewVersion() {
-    return !!applicationFunctionManager.doNavbarIconClick
 }
 
 jQuery(async () => {
