@@ -14,6 +14,9 @@ import { executeTranslation } from "./services/translate.js";
 import applicationFunctionManager from "./services/appFuncManager.js"
 import { SheetBase } from "./core/table/base.js";
 import { Cell } from "./core/table/cell.js";
+// === PATCH: Short-term memory window (hide messages beyond last N) ===
+// Import helper to hide/unhide chat messages
+import { hideChatMessageRange } from '../../../chats.js'; // adjust path if root differs
 
 console.log("______________________记忆插件：开始加载______________________")
 
@@ -121,7 +124,44 @@ export function convertOldTablesToNewSheets(oldTableList, targetPiece) {
     console.log("转换旧表格数据为新表格数据", sheets);
     return sheets;
 }
+/**
+ * Applies the short term memory window.
+ * Keeps only the last `n` messages visible; hides all earlier ones.
+ * When n <= 0 all messages are shown.
+ * @param {number} [nOverride] Optional override (used when user changes setting)
+ */
+async function applyShortTermMemoryWindow(nOverride) {
+    try {
+        const n = typeof nOverride === 'number'
+            ? nOverride
+            : (parseInt(USER.tableBaseSetting.short_term_memory) || 0);
 
+        const chat = USER.getContext()?.chat || [];
+        if (!Array.isArray(chat) || chat.length === 0) return;
+
+        // Show all if window disabled
+        if (n <= 0) {
+            const unhidePromises = [];
+            for (let i = 0; i < chat.length; i++) {
+                // false => unhide
+                unhidePromises.push(hideChatMessageRange(i, i, false));
+            }
+            await Promise.all(unhidePromises);
+            return;
+        }
+
+        const startVisible = Math.max(0, chat.length - n);
+        const promises = [];
+
+        for (let i = 0; i < chat.length; i++) {
+            const shouldHide = i < startVisible;
+            promises.push(hideChatMessageRange(i, i, shouldHide));
+        }
+        await Promise.all(promises);
+    } catch (e) {
+        console.warn('[ShortTermMemory] Failed applying memory window:', e);
+    }
+}
 function addOldTablePrompt(sheet) {
     const tableStructure = USER.tableBaseSetting.tableStructure.find(table => table.tableName === sheet.name);
     if (!tableStructure) return false;
@@ -581,33 +621,29 @@ function __buildThinkingPromptOverride(latestSection) {
 
 // REPLACE the existing onChatCompletionPromptReady with the original (restored) behavior
 
+// PATCH: modify prompt assembly to honor short_term_memory = 0 (only current user message) and CRM logic
 async function onChatCompletionPromptReady(eventData) {
     try {
-        // Step-by-step mode: ONLY inject a single read-only table snapshot (old behavior), then exit
+        // Step-by-step: keep original early return logic
         if (USER.tableBaseSetting.step_by_step === true) {
             if (USER.tableBaseSetting.isExtensionAble === true &&
                 USER.tableBaseSetting.isAiReadTable === true &&
                 USER.tableBaseSetting.injection_mode !== "injection_off") {
 
-                const tableData = getTablePrompt(eventData, true); // pure data (title + headers + rows)
+                const tableData = getTablePrompt(eventData, true);
                 if (tableData) {
                     const finalPrompt =
                         `以下是通过表格记录的当前场景信息以及历史记录信息，你需要以此为参考进行思考：\n${tableData}`;
                     if (USER.tableBaseSetting.deep === 0) {
                         eventData.chat.push({ role: getMesRole(), content: finalPrompt });
                     } else {
-                        eventData.chat.splice(
-                            -USER.tableBaseSetting.deep,
-                            0,
-                            { role: getMesRole(), content: finalPrompt }
-                        );
+                        eventData.chat.splice(-USER.tableBaseSetting.deep, 0, { role: getMesRole(), content: finalPrompt });
                     }
                 }
             }
-            return; // (Old logic) Do NOT inject message_template or thinking_template in step-by-step mode
+            return;
         }
 
-        // Guard conditions (unchanged from original)
         if (eventData.dryRun === true ||
             USER.tableBaseSetting.isExtensionAble === false ||
             USER.tableBaseSetting.isAiReadTable === false ||
@@ -615,9 +651,35 @@ async function onChatCompletionPromptReady(eventData) {
             return;
         }
 
-        // Original simple behavior: build thinking + message templates and inject together
-        const thinkingContent = initThinkingData(eventData); // thinking_template (with <previous_thinking>)
-        const promptContent = initTableData(eventData);      // message_template (with {{tableData}} substitution)
+        // SHORT TERM MEMORY = 0 => only keep the latest user message before injection
+        const stm = parseInt(
+            USER.tableBaseSetting?.short_term_memory ??
+            $('#dataTable_short_term_memory').val() ??
+            '0',
+            10
+        ) || 0;
+
+        if (stm === 0) {
+            // Find last user message in the (pre-built) chat array
+            let lastUserIdx = -1;
+            for (let i = eventData.chat.length - 1; i >= 0; i--) {
+                const m = eventData.chat[i];
+                if (m?.role === 'user') {
+                    lastUserIdx = i;
+                    break;
+                }
+            }
+            if (lastUserIdx !== -1) {
+                eventData.chat = [eventData.chat[lastUserIdx]]; // retain only current user prompt
+            } else {
+                // Fallback: if no explicit user role found, keep only final message
+                eventData.chat = eventData.chat.length ? [eventData.chat[eventData.chat.length - 1]] : [];
+            }
+        }
+
+        // Build injections AFTER possible trimming (but CRM uses full context internally)
+        const thinkingContent = initThinkingData(eventData); // uses CRM count
+        const promptContent = initTableData(eventData);
         const role = getMesRole();
         const inserts = [];
 
@@ -636,12 +698,11 @@ async function onChatCompletionPromptReady(eventData) {
             }
         }
 
-        // Keep legacy sheet/status refresh
         updateSheetsView();
     } catch (error) {
         EDITOR.error(`记忆插件：表格数据注入失败\n原因：`, error.message, error);
     }
-    console.log("注入表格总体提示词 + 思考提示词 (restored legacy behavior)", eventData.chat);
+    console.log("注入表格总体提示词 + 思考提示词 (with STM=0 & CRM support)", eventData.chat);
 }
 /**
  * 宏获取提示词
@@ -711,12 +772,28 @@ function getLatestAssistantCriticalThinkingSection() {
     return '';
 }
 
+// PATCH: enhance thinking data to support multi previous critical thinking sections (CRM setting)
 function initThinkingData(eventData) {
     try {
         let tpl = USER.tableBaseSetting?.thinking_template || '';
         if (!tpl || typeof tpl !== 'string') return '';
-        const prev = getLatestAssistantCriticalThinkingSection();
-        return replaceUserTag(tpl.replace('<previous_thinking>', prev));
+        // Critical thinking memory (CRM) count
+        const crmCount = parseInt(
+            USER.tableBaseSetting?.critical_thinking_memory ??
+            $('#dataTable_critical_thinking_memory').val() ??
+            '0',
+            10
+        ) || 0;
+
+        // Collect last N critical thinking sections from full context (even if hidden)
+        let previousCombined = '';
+        if (crmCount > 0) {
+            const fullChat = USER.getContext()?.chat || [];
+            const sections = __collectLastCriticalThinkingSections(fullChat, crmCount);
+            previousCombined = sections.join('\n');
+        }
+        // Always inject template, but substitute empty string if crmCount === 0
+        return replaceUserTag(tpl.replace('<previous_thinking>', previousCombined));
     } catch (error) {
         EDITOR.error('记忆插件：思考提示词注入失败\n原因：', error.message, error);
         return '';
@@ -941,3 +1018,24 @@ jQuery(async () => {
 
     console.log("______________________记忆插件：加载完成______________________")
 });
+
+// Hook: after initial settings load & chat presence
+(async function __initShortTermMemoryWindowHook() {
+    // Defer until current event loop settles (ensures chat loaded)
+    setTimeout(() => applyShortTermMemoryWindow(), 0);
+})();
+
+// Re-apply when chat structurally changes (new messages loaded / history switch)
+APP?.eventSource?.on?.(APP.event_types.CHAT_CHANGED, () => applyShortTermMemoryWindow());
+APP?.eventSource?.on?.(APP.event_types.CHARACTER_MESSAGE_RENDERED, () => applyShortTermMemoryWindow());
+
+// Listen for dynamic user changes to the short_term_memory setting input (if present)
+$(document).on('change', '#short_term_memory_input', function () {
+    const val = parseInt(this.value);
+    USER.tableBaseSetting.short_term_memory = isNaN(val) ? 0 : val;
+    USER.saveSettings && USER.saveSettings();
+    applyShortTermMemoryWindow(USER.tableBaseSetting.short_term_memory);
+});
+
+// Optional: expose for debugging / console use
+window.applyShortTermMemoryWindow = applyShortTermMemoryWindow;
