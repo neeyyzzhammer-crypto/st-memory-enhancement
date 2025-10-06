@@ -130,10 +130,7 @@ export function convertOldTablesToNewSheets(oldTableList, targetPiece) {
  * When n <= 0 all messages are shown.
  * @param {number} [nOverride] Optional override (used when user changes setting)
  */
-// PATCH: revise short-term memory logic to keep ONLY the last N assistant messages (+ their paired user msgs) visible.
-// N now counts ASSISTANT messages. We reveal all messages from the earliest of those N assistant messages onward.
-// If messages are strictly user/assistant alternating, this approximates showing the last 2N turns.
-// Everything before that point is hidden. If N <= 0 => show all.
+// PATCH: assistant-based short-term memory — keep ONLY last N assistant messages + their preceding user messages
 async function applyShortTermMemoryWindow(nOverride) {
     try {
         const rawN = typeof nOverride === 'number'
@@ -143,43 +140,53 @@ async function applyShortTermMemoryWindow(nOverride) {
         const chat = USER.getContext()?.chat || [];
         if (!Array.isArray(chat) || chat.length === 0) return;
 
-        // N <= 0 => unhide all
+        // Show all if disabled
         if (rawN <= 0) {
-            const unhideAll = chat.map((_, i) => hideChatMessageRange(i, i, false));
-            await Promise.all(unhideAll);
+            await Promise.all(chat.map((_, i) => hideChatMessageRange(i, i, false)));
             return;
         }
 
-        // Collect indices of assistant messages
-        const assistantIndices = [];
+        // Collect assistant indices
+        const assistantIdx = [];
         for (let i = 0; i < chat.length; i++) {
-            const m = chat[i];
-            if (m && m.is_user === false) assistantIndices.push(i);
+            if (chat[i] && chat[i].is_user === false) assistantIdx.push(i);
         }
 
-        // Not enough assistant messages to trim => show all
-        if (assistantIndices.length <= rawN) {
-            const unhideAll = chat.map((_, i) => hideChatMessageRange(i, i, false));
-            await Promise.all(unhideAll);
+        // If assistant messages fewer/equal than N => show all
+        if (assistantIdx.length <= rawN) {
+            await Promise.all(chat.map((_, i) => hideChatMessageRange(i, i, false)));
             return;
         }
 
-        // Determine the indices of the last rawN assistant messages
-        const keepAssistant = assistantIndices.slice(-rawN);
-        const earliestKeepAssistantIndex = keepAssistant[0];
+        // Last N assistant indices
+        const lastNAssistant = assistantIdx.slice(-rawN);
 
-        // Option: expand window to approximate "double" (include paired user turns)
-        // If there are earlier user messages immediately preceding earliest assistant kept,
-        // we still hide them per requirement ("apply hidden to everything outside last N assistant messages").
-        // Thus we hide strictly messages with index < earliestKeepAssistantIndex.
-        const promises = [];
-        for (let i = 0; i < chat.length; i++) {
-            const shouldHide = i < earliestKeepAssistantIndex;
-            promises.push(hideChatMessageRange(i, i, shouldHide));
+        // Build keep set: each assistant plus its nearest preceding user message (if any)
+        const keepSet = new Set();
+        for (const aIdx of lastNAssistant) {
+            keepSet.add(aIdx);
+            for (let j = aIdx - 1; j >= 0; j--) {
+                const m = chat[j];
+                if (m && m.is_user === true) {
+                    keepSet.add(j);
+                    break;
+                }
+                // Skip assistant / system until a user is found or start reached
+            }
         }
-        await Promise.all(promises);
+
+        // Determine earliest index among kept messages
+        const earliestKeep = Math.min(...keepSet);
+
+        // Hide everything BEFORE earliest kept index; unhide everything from earliestKeep onward
+        const ops = [];
+        for (let i = 0; i < chat.length; i++) {
+            const hide = i < earliestKeep;
+            ops.push(hideChatMessageRange(i, i, hide));
+        }
+        await Promise.all(ops);
     } catch (e) {
-        console.warn('[ShortTermMemory] Failed applying memory window (assistant-based):', e);
+        console.warn('[ShortTermMemory] Failed (assistant+preceding-user mode):', e);
     }
 }
 function addOldTablePrompt(sheet) {
@@ -1049,8 +1056,8 @@ jQuery(async () => {
 APP?.eventSource?.on?.(APP.event_types.CHAT_CHANGED, () => applyShortTermMemoryWindow());
 APP?.eventSource?.on?.(APP.event_types.CHARACTER_MESSAGE_RENDERED, () => applyShortTermMemoryWindow());
 
-// Listen for dynamic user changes to the short_term_memory setting input (if present)
-$(document).on('change', '#short_term_memory_input', function () {
+// PATCH: dynamic listener for correct STm input id (dataTable_short_term_memory)
+$(document).on('change', '#dataTable_short_term_memory', function () {
     const val = parseInt(this.value);
     USER.tableBaseSetting.short_term_memory = isNaN(val) ? 0 : val;
     USER.saveSettings && USER.saveSettings();
