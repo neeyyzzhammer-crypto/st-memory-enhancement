@@ -494,6 +494,13 @@ function InitBinging() {
         const value = $(this).val();
         USER.tableBaseSetting.deep = Math.abs(value);
     })
+    $('#dataTable_short_term_memory').val(USER.tableBaseSetting.short_term_memory ?? 2).on('input', function () {
+        let v = parseInt(this.value, 10);
+        if (isNaN(v) || v < 1) v = 1;
+        this.value = v;
+        USER.tableBaseSetting.short_term_memory = v;
+        USER.saveSettings && USER.saveSettings();
+    });
     // 分步填表提示词
     $('#step_by_step_user_prompt').on('input', function() {
         USER.tableBaseSetting.step_by_step_user_prompt = $(this).val();
@@ -597,6 +604,12 @@ export function renderSetting() {
     $(`#table_cell_width_mode option[value="${USER.tableBaseSetting.table_cell_width_mode}"]`).prop('selected', true);
     $('#dataTable_message_template').val(USER.tableBaseSetting.message_template);
     $('#dataTable_deep').val(USER.tableBaseSetting.deep);
+    // ADD: inject short-term memory field here so it exists before InitBinging runs
+    ensureShortTermMemoryField();
+
+    // Optionally sync its value (in case settings changed)
+    $('#dataTable_short_term_memory').val(USER.tableBaseSetting.short_term_memory ?? 2);
+
     $('#clear_up_stairs').val(USER.tableBaseSetting.clear_up_stairs);
     $('#clear_up_stairs_value').text(USER.tableBaseSetting.clear_up_stairs);
     $('#rebuild_token_limit').val(USER.tableBaseSetting.rebuild_token_limit_value);

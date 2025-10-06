@@ -86,17 +86,22 @@
                             <div style="padding-left: 5px;">
                                 <div style="display: flex; align-items: center;">
                                     <label for="dataTable_injection_mode" style="min-width: 50px"
-                                        data-i18n="Injection">注入：</label>
+                                           data-i18n="Injection">注入：</label>
                                     <select id="dataTable_injection_mode">
-                                        <option value="injection_off" data-i18n="Turn off injection">关闭注入
+                                        <option value="injection_off" data-i18n="Turn off injection">
+                                            关闭注入
                                         </option>
                                         <option value="deep_system">@D ⚙</option>
                                         <option value="deep_user">@D 👤</option>
                                         <option value="deep_assistant">@D 🤖</option>
                                     </select>
                                     <label for="dataTable_deep" style="min-width: 60px; padding-left: 10px;"
-                                        data-i18n="Depth">深度：</label>
+                                           data-i18n="Depth">深度：</label>
                                     <input id="dataTable_deep" class="text_pole" type="number">
+                                    <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+                                        <label for="dataTable_short_term_memory" style="white-space:nowrap;">Short-term memory</label>
+                                        <input id="dataTable_short_term_memory" type="number" min="1" value="2" class="text_pole" />
+                                    </div>
                                 </div>
                             </div>
                         </div>
