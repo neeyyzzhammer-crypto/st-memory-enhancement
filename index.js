@@ -131,28 +131,35 @@ export function convertOldTablesToNewSheets(oldTableList, targetPiece) {
  * @param {number} [nOverride] Optional override (used when user changes setting)
  */
 // PATCH: assistant-based short-term memory — keep ONLY last N assistant messages + their preceding user messages
+// PATCH: Rewritten short-term memory window logic (robust + idempotent)
 async function applyShortTermMemoryWindow(nOverride) {
     try {
-        rawN = typeof nOverride === 'number'
+        let rawN = (typeof nOverride === 'number')
             ? nOverride
-            : (parseInt(USER.tableBaseSetting.short_term_memory) || 0);
+            : (parseInt(USER.tableBaseSetting.short_term_memory, 10) || 0);
 
         const chat = USER.getContext()?.chat || [];
         if (!Array.isArray(chat) || chat.length === 0) return;
-        rawN *= 2; // account for user-assistant pairs
-        // Show all if disabled
-        if (rawN < 0 || chat.length <= rawN) {            
-            return;
+
+        const total = chat.length;
+        const disabled = rawN <= 0;
+
+        // Translate assistant-count to rough message count (assistant + preceding user)
+        let keepCount = disabled ? total : Math.min(total, rawN * 2);
+
+        // Compute start index of window to remain visible
+        const keepStartIndex = total - keepCount;
+
+        // Idempotency: skip if same window already applied
+        const cacheKey = disabled ? 'ALL' : `${keepStartIndex}:${total}`;
+        if (applyShortTermMemoryWindow._lastApplied === cacheKey) return;
+        applyShortTermMemoryWindow._lastApplied = cacheKey;
+
+        const promises = [];
+        for (let i = 0; i < total; i++) {
+            const show = disabled || i >= keepStartIndex;
+            promises.push(hideChatMessageRange(i, i, show));
         }
-        
-        // Collect indices
-        const overallIdx = [];
-        for (let i = chat.length; i >= chat.length - rawN; i++) {
-            promises.push(hideChatMessageRange(i, i, true));
-        }
-        for (let i = chat.length - rawN; i >= 0; i++) {
-            promises.push(hideChatMessageRange(i, i, false));
-        }        
         await Promise.all(promises);
     } catch (e) {
         console.warn('[ShortTermMemory] Failed (assistant+preceding-user mode):', e);
