@@ -717,7 +717,8 @@ function createDefaultMemoryTableTemplate() {
     newTemplate.triggerSend = true;
     newTemplate.triggerSendDeep = 3;
     
-    newTemplate.source.data.note = 'Single memory table storing all contextual information with place, characters, keywords, and content descriptions';
+    newTemplate.source.data.note= 'Single memory table storing all contextual information with place, characters, keywords, content descriptions, and cognitive impact (low/medium/high)';
+
     newTemplate.source.data.initNode = 'This round must search for events from the context and insert them using insertRow function';
     newTemplate.source.data.insertNode = 'When new significant events, character interactions, or location changes occur';
     newTemplate.source.data.updateNode = 'When existing entries need content updates or clarification';

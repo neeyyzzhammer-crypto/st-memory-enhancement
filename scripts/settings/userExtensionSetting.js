@@ -749,6 +749,7 @@ export function loadSettings() {
 
         try {
             initTableStructureToTemplate();
+            ensureRuntimeMemoryTableHasCognitiveImpact();
             USER.tableBaseSetting.updateIndex = 5;
             console.log("迁移成功");
         } catch (error) {
@@ -830,16 +831,17 @@ export function initTableStructureToTemplate() {
 function createDefaultMemoryTableTemplate() {
     const newTemplate = new BASE.SheetTemplate();
     newTemplate.domain = 'global';
-    newTemplate.createNewTemplate(5, 1, false); // 4 columns + header
+    // 6 columns total (blank index + 5 headers)
+    newTemplate.createNewTemplate(6, 1, false);
     newTemplate.name = 'Memory Table';
 
-    // 设置列标题
     const headerCells = newTemplate.getCellsByRowIndex(0);
-    if (headerCells.length >= 5) {
+    if (headerCells.length >= 6) {
         headerCells[1].data.value = 'Place';
         headerCells[2].data.value = 'Characters';
         headerCells[3].data.value = 'Keys';
         headerCells[4].data.value = 'Content';
+        headerCells[5].data.value = 'Cognitive Impact';
     }
 
     newTemplate.enable = true;
@@ -848,7 +850,7 @@ function createDefaultMemoryTableTemplate() {
     newTemplate.triggerSend = true;
     newTemplate.triggerSendDeep = 3;
 
-    newTemplate.source.data.note = 'Single memory table storing all contextual information with place, characters, keywords, and content descriptions';
+    newTemplate.source.data.note = 'Single memory table storing all contextual information with place, characters, keywords, content descriptions, and cognitive impact (low/medium/high)';
     newTemplate.source.data.initNode = 'This round must search for events from the context and insert them using insertRow function';
     newTemplate.source.data.insertNode = 'When new significant events, character interactions, or location changes occur';
     newTemplate.source.data.updateNode = 'When existing entries need content updates or clarification';
@@ -857,16 +859,27 @@ function createDefaultMemoryTableTemplate() {
     USER.getSettings().table_selected_sheets.push(newTemplate.uid);
     newTemplate.save();
 
-    console.log("创建默认记忆表模板:", newTemplate);
+    console.log("创建默认记忆表模板 (含 Cognitive Impact):", newTemplate);
 }
 
+// 2) UPDATED processExistingTemplate to migrate & append the column if missing.
+// 2) UPDATED processExistingTemplate to migrate & append the column if missing.
 function processExistingTemplate(template) {
+    // Clone columns and append the new column if absent
+    const columns = Array.isArray(template.columns) ? [...template.columns] : [];
+    const hadColumn = columns.includes('Cognitive Impact');
+    if (!hadColumn) {
+        columns.push('Cognitive Impact');
+        console.log('[Memory Table Migration] Added missing "Cognitive Impact" column.');
+    }
+
     const newTemplate = new BASE.SheetTemplate();
     newTemplate.domain = 'global';
-    newTemplate.createNewTemplate(template.columns.length + 1, 1, false);
-    newTemplate.name = template.tableName;
+    // +1 for the leading blank index column
+    newTemplate.createNewTemplate(columns.length + 1, 1, false);
+    newTemplate.name = template.tableName || 'Memory Table';
 
-    template.columns.forEach((column, index) => {
+    columns.forEach((column, index) => {
         newTemplate.findCellByPosition(0, index + 1).data.value = column;
     });
 
@@ -880,7 +893,13 @@ function processExistingTemplate(template) {
         newTemplate.config = JSON.parse(JSON.stringify(template.config));
     }
 
-    newTemplate.source.data.note = template.note || '';
+    // Ensure note mentions the new column
+    const baseNote = template.note || '';
+    if (!/cognitive impact/i.test(baseNote)) {
+        newTemplate.source.data.note = (baseNote + '\nIncludes cognitive impact (low/medium/high)').trim();
+    } else {
+        newTemplate.source.data.note = baseNote;
+    }
     newTemplate.source.data.initNode = template.initNode || '';
     newTemplate.source.data.deleteNode = template.deleteNode || '';
     newTemplate.source.data.updateNode = template.updateNode || '';
@@ -888,8 +907,42 @@ function processExistingTemplate(template) {
 
     USER.getSettings().table_selected_sheets.push(newTemplate.uid);
     newTemplate.save();
-}
 
+    console.log("迁移/处理记忆表模板 (已确保 Cognitive Impact 列):", newTemplate);
+}
+// 3) OPTIONAL: If you want to enforce migration on existing loaded runtime templates too,
+// you can call this helper after initTableStructureToTemplate or during loadSettings.
+function ensureRuntimeMemoryTableHasCognitiveImpact() {
+    try {
+        let changed = false;
+        BASE.templates.forEach(t => {
+            if (t.name === 'Memory Table' && t.hashSheet?.[0]) {
+                const headerRow = t.hashSheet[0]
+                    .slice(1)
+                    .map(cellUid => t.cells.get(cellUid)?.data?.value);
+                if (headerRow && !headerRow.includes('Cognitive Impact')) {
+                    // Expand template by adding a new header cell
+                    const template = new BASE.SheetTemplate(t.uid);
+                    const oldCols = headerRow.length;
+                    template.createNewTemplate(oldCols + 2, 1, false); // rebuild with +1 new header (+1 blank)
+                    // Re-set old headers
+                    headerRow.forEach((val, i) => {
+                        template.findCellByPosition(0, i + 1).data.value = val;
+                    });
+                    template.findCellByPosition(0, oldCols + 1).data.value = 'Cognitive Impact';
+                    template.save();
+                    changed = true;
+                    console.log('[Runtime Migration] Added "Cognitive Impact" to existing Memory Table template.');
+                }
+            }
+        });
+        if (changed) {
+            USER.saveSettings && USER.saveSettings();
+        }
+    } catch (e) {
+        console.warn('[Runtime Migration] Cognitive Impact column ensure failed:', e);
+    }
+}
 function templateToTableStructure() {
     const tableTemplates = BASE.templates.map((templateData, index) => {
         const template = new BASE.SheetTemplate(templateData.uid)

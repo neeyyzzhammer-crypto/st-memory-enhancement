@@ -153,9 +153,17 @@ export function findNextChatWhitTableData(startIndex, isIncludeStartIndex = fals
  * 生成表格总体提示词
  */
 export function initTableData(eventData) {
-    const allPrompt = USER.tableBaseSetting.message_template.replace('{{tableData}}', getTablePrompt(eventData));
-    const promptContent = replaceUserTag(allPrompt);
-    console.log("完整提示", promptContent);
+    const template = USER.tableBaseSetting.message_template || '';
+    const tableData = getTablePrompt(eventData);
+    const replaced = template.replace(/{{tableData}}/g, tableData);
+    if (!template.includes('{{tableData}}')) {
+        console.warn('[Memory Enhancement] message_template does not contain {{tableData}} placeholder.');
+    } else if (replaced === template) {
+        console.warn('[Memory Enhancement] {{tableData}} placeholder present but no replacement occurred (tableData empty).');
+    } else {
+        console.debug('[Memory Enhancement] {{tableData}} successfully populated. Length:', tableData.length);
+    }
+    const promptContent = replaceUserTag(replaced);
     return promptContent;
 }
 
@@ -163,19 +171,36 @@ export function initTableData(eventData) {
  * 获取表格提示词
  */
 export function getTablePrompt(eventData, isPureData = false) {
-    const lastSheetsPiece = BASE.getReferencePiece();
-    if (!lastSheetsPiece) return '';
-    return getTablePromptByPiece(lastSheetsPiece, isPureData);
-}
-
-export function getTablePromptByPiece(piece, isPureData = false) {
-    const { hash_sheets } = piece;
-    const sheets = BASE.hashSheetsToSheets(hash_sheets)
-        .filter(sheet => sheet.enable)
-        .filter(sheet => sheet.sendToContext !== false);
-    const customParts = isPureData ? ['title', 'headers', 'rows'] : ['title', 'node', 'headers', 'rows', 'editRules'];
-    const sheetDataPrompt = sheets.map((sheet, index) => sheet.getTableText(index, customParts, piece)).join('\n');
-    return sheetDataPrompt;
+    let piece = null;
+    try {
+        piece = BASE.getReferencePiece && BASE.getReferencePiece();
+    } catch (_) {}
+    if (!piece) {
+        piece = _findFallbackSheetsPiece();
+        if (!piece) {
+            console.warn('[Memory Enhancement] No sheets piece found. Returning empty table prompt.');
+            return '';
+        }
+    }
+    const prompt = getTablePromptByPiece(piece, isPureData);
+    if (!prompt.trim()) {
+        // If structure exists but no rows, optionally synthesize headers (only once)
+        try {
+            const sheets = BASE.hashSheetsToSheets(piece.hash_sheets || {});
+            const enabled = sheets.filter(s => s.enable && s.sendToContext !== false);
+            if (enabled.length) {
+                // Build a minimal header-only representation to avoid leaving {{tableData}} blank
+                const headerBlocks = enabled.map((s, i) => {
+                    const headers = s.getCellsByRowIndex(0).slice(1).map(c => c.data.value || '').join(' | ');
+                    return `[${i}:${s.name}]\n${headers}\n(表格暂无数据 / no rows yet)`;
+                }).join('\n\n');
+                return headerBlocks;
+            }
+        } catch (e) {
+            console.warn('[Memory Enhancement] Could not synthesize header-only table prompt:', e);
+        }
+    }
+    return prompt;
 }
 
 /**
