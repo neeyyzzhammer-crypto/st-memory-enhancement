@@ -139,51 +139,29 @@ async function applyShortTermMemoryWindow(nOverride) {
 
         const chat = USER.getContext()?.chat || [];
         if (!Array.isArray(chat) || chat.length === 0) return;
-
+        rawN *= 2; // account for user-assistant pairs
         // Show all if disabled
-        if (rawN <= 0) {
-            await Promise.all(chat.map((_, i) => hideChatMessageRange(i, i, false)));
+        if (rawN < 0) {            
             return;
         }
 
-        // Collect assistant indices
-        const assistantIdx = [];
-        for (let i = chat.length-1; i >= 0; i--) {
-            if (chat[i] && chat[i].is_user === false) assistantIdx.push(i);
-        }
-
-        // If assistant messages fewer/equal than N => show all
-        if (assistantIdx.length <= rawN) {
-            await Promise.all(chat.map((_, i) => hideChatMessageRange(i, i, false)));
-            return;
-        }
-
-        // Last N assistant indices
-        const lastNAssistant = assistantIdx.slice(-rawN);
-
-        // Build keep set: each assistant plus its nearest preceding user message (if any)
-        const keepSet = new Set();
-        for (const aIdx of lastNAssistant) {
-            keepSet.add(aIdx);
-            for (let j = aIdx - 1; j >= 0; j--) {
-                const m = chat[j];
-                if (m && m.is_user === true) {
-                    keepSet.add(j);
-                    break;
-                }
-                // Skip assistant / system until a user is found or start reached
-            }
-        }
-
-        // Determine earliest index among kept messages
-        const earliestKeep = Math.min(...keepSet);
-
-        // Hide everything BEFORE earliest kept index; unhide everything from earliestKeep onward
-        const ops = [];
+        // Collect indices
+        const overallIdx = [];
         for (let i = 0; i < chat.length; i++) {
-            const hide = i < earliestKeep;
-            ops.push(hideChatMessageRange(i, i, hide));
+            if (chat[i]) overallIdx.push(i);
         }
+
+        // If messages fewer/equal than N => show all
+        if (overallIdx.length <= rawN) {            
+            return;
+        }
+
+        // Last N indices
+        const notLastN = overallIdx.slice(0, overallIdx.length - rawN);
+        // Determine earliest index among kept messages
+        const earliestHide = Math.min(...notLastN);
+        const latestHide = Math.max(...notLastN);
+        ops.push(hideChatMessageRange(earliestHide, latestHide, true));        
         await Promise.all(ops);
     } catch (e) {
         console.warn('[ShortTermMemory] Failed (assistant+preceding-user mode):', e);
