@@ -930,21 +930,21 @@ jQuery(async () => {
         VERSION,
     };
 
-    // 原本的版本检查（如需改为安全模式，可替换为 try/catch 包裹）
-    fetch("http://api.muyoo.com.cn/check-version", {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientVersion: VERSION, user: USER.getContext().name1 })
-    }).then(res => res.json()).then(res => {
-        if (res.success) {
-            if (!res.isLatest) {
-                $("#tableUpdateTag").show();
-                $("#setting_button_new_tag").show();
-            }
-            if (res.toastr) EDITOR.warning(res.toastrText);
-            if (res.message) $("#table_message_tip").html(res.message);
-        }
-    }).catch(e => console.warn('[Memory Enhancement] 版本检查失败:', e));
+    //// 原本的版本检查（如需改为安全模式，可替换为 try/catch 包裹）
+    //fetch("http://api.muyoo.com.cn/check-version", {
+    //    method: 'POST',
+    //    headers: { 'Content-Type': 'application/json' },
+    //    body: JSON.stringify({ clientVersion: VERSION, user: USER.getContext().name1 })
+    //}).then(res => res.json()).then(res => {
+    //    if (res.success) {
+    //        if (!res.isLatest) {
+    //            $("#tableUpdateTag").show();
+    //            $("#setting_button_new_tag").show();
+    //        }
+    //        if (res.toastr) EDITOR.warning(res.toastrText);
+    //        if (res.message) $("#table_message_tip").html(res.message);
+    //    }
+    //}).catch(e => console.warn('[Memory Enhancement] 版本检查失败:', e));
 
     $('.extraMesButtons').append('<div title="查看表格" class="mes_button open_table_by_id">表格</div>');
 
