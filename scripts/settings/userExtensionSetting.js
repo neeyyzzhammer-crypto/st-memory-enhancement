@@ -283,320 +283,60 @@ async function resetSettings() {
 }
 
 function ensureShortTermMemoryField() {
-    const $deepInput = $('#dataTable_deep');
-    if (!$deepInput.length) return;
-
-    // Avoid duplicate insertion
-    if ($('#dataTable_short_term_memory').length) return;
-
-    // Wrap existing deep input (if not already wrapped) for consistent layout
-    if (!$deepInput.parent().hasClass('short-term-memory-wrapper')) {
-        $deepInput.wrap('<div class="short-term-memory-wrapper" style="display:flex;align-items:center;gap:8px;margin-top:4px;"></div>');
+    // 已存在吗？
+    if ($('#dataTable_short_term_memory').length) {
+        $('#dataTable_short_term_memory').val(USER.tableBaseSetting.short_term_memory ?? 2);
+        return;
     }
 
-    // Create new label + input (clone size/style from deep input)
-    const deepWidth = $deepInput.outerWidth();
-    const deepClass = $deepInput.attr('class') || 'text_pole';
+    const $deepInput = $('#dataTable_deep');
+    if (!$deepInput.length) {
+        console.warn('[短期记忆] #dataTable_deep 尚未准备好。');
+        return;
+    }
 
-    const $label = $('<label>', {
-        text: 'Short-term memory',
-        for: 'dataTable_short_term_memory',
-        style: 'white-space:nowrap;'
-    });
+    // 找到一个合理的“行”容器，以便克隆定位逻辑。
+    // 根据需要调整选择器以匹配您现有的设置行容器。
+    const $rowContainer =
+        $deepInput.closest('.setting-item, .flex-container, .row, .formRow, div');
 
-    const $input = $('<input>', {
-        id: 'dataTable_short_term_memory',
-        type: 'number',
-        min: 1,
-        value: USER.tableBaseSetting.short_term_memory ?? 2,
-        class: deepClass,
-        style: `width:${deepWidth}px;`
-    });
+    if (!$rowContainer.length) {
+        console.warn('[短期记忆] 无法找到 #dataTable_deep 的容器，放弃注入。');
+        return;
+    }
 
-    $deepInput.parent().after(
-        $('<div>', {
-            class: 'short-term-memory-container',
-            style: 'display:flex;align-items:center;gap:8px;margin-top:6px;'
-        }).append($label, $input)
-    );
+    // 确保父级 flex 可以换行，以便新行换到下一行，而不是压缩到行内
+    const $parent = $rowContainer.parent();
+    if ($parent.length && $parent.css('display') === 'flex' && $parent.css('flex-wrap') === 'nowrap') {
+        $parent.css('flex-wrap', 'wrap');
+    }
+
+    // 在现有深度行下方构建一个新的全宽行
+    const $newRow = $(`
+        <div class="short-term-memory-row" style="
+            display:flex;
+            align-items:center;
+            gap:8px;
+            margin-top:6px;
+            width:100%;
+            flex-basis:100%;
+        ">
+            <label for="dataTable_short_term_memory" style="white-space:nowrap;">短期记忆</label>
+            <input id="dataTable_short_term_memory"
+                   type="number"
+                   min="1"
+                   class="${$deepInput.attr('class') || 'text_pole'}"
+                   style="max-width:140px;"
+                   value="${USER.tableBaseSetting.short_term_memory ?? 2}" />
+        </div>
+    `);
+
+    // 在整个深度行容器之后插入，以便它出现在下一行
+    $rowContainer.after($newRow);
+    console.log('[短期记忆] 字段已注入至深度字段下方.');
 }
 
-function InitBinging() {
-    console.log('初始化绑定')
-    // 开始绑定事件
-    // 导入预设
-    $('#table-set-import').on('click', () => importTableSet());
-    // 导出
-    $("#table-set-export").on('click', () => exportTableSet());
-    // 重置设置
-    $("#table-reset").on('click', () => resetSettings());
-    // 回退表格2.0到1.0
-    $("#table-init-from-2-to-1").on('click', async () => {
-        if (await rollbackVersion() === true) {
-            window.location.reload()
-        }
-    });
-    // 插件总体开关 - FIXED: Added $ for jQuery selector
-    $('#table_switch').change(function () {
-        USER.tableBaseSetting.isExtensionAble = this.checked;
-        EDITOR.success(this.checked ? '插件已开启' : '插件已关闭，可以打开和手动编辑表格但AI不会读表和生成');
-        updateSystemMessageTableStatus();   // 将表格数据状态更新到系统消息中
-    });
-    // 调试模式开关
-    $('#table_switch_debug_mode').change(function () {
-        USER.tableBaseSetting.tableDebugModeAble = this.checked;
-        EDITOR.success(this.checked ? '调试模式已开启' : '调试模式已关闭');
-    });
-    // 插件读表开关
-    $('#table_read_switch').change(function () {
-        USER.tableBaseSetting.isAiReadTable = this.checked;
-        EDITOR.success(this.checked ? 'AI现在会读取表格' : 'AI现在将不会读表');
-    });
-    // 插件写表开关
-    $('#table_edit_switch').change(function () {
-        USER.tableBaseSetting.isAiWriteTable = this.checked;
-        EDITOR.success(this.checked ? 'AI的更改现在会被写入表格' : 'AI的更改现在不会被写入表格');
-    });
-
-    // 表格插入模式
-    $('#dataTable_injection_mode').change(function (event) {
-        USER.tableBaseSetting.injection_mode = event.target.value;
-    });
-    $("#fill_table_time").change(function() {
-        const value = $(this).val();
-        const step_by_step = value === 'after'
-        $('#reply_options').toggle(!step_by_step);
-        $('#step_by_step_options').toggle(step_by_step);
-        USER.tableBaseSetting.step_by_step = step_by_step;
-    })
-    // 确认执行
-    $('#confirm_before_execution').change(function() {
-        USER.tableBaseSetting.confirm_before_execution = $(this).prop('checked');
-    })
-    // //整理表格相关高级设置
-    // $('#advanced_settings').change(function() {
-    //     $('#advanced_options').toggle(this.checked);
-    //     USER.tableBaseSetting.advanced_settings = this.checked;
-    // });
-    // 忽略删除
-    $('#ignore_del').change(function() {
-        USER.tableBaseSetting.bool_ignore_del = $(this).prop('checked');
-    });
-    // 忽略用户回复
-    $('#ignore_user_sent').change(function() {
-        USER.tableBaseSetting.ignore_user_sent = $(this).prop('checked');
-    });
-    // // 强制刷新
-    // $('#bool_force_refresh').change(function() {
-    //     USER.tableBaseSetting.bool_force_refresh = $(this).prop('checked');
-    // });
-    // 静默刷新
-    $('#bool_silent_refresh').change(function() {
-        USER.tableBaseSetting.bool_silent_refresh = $(this).prop('checked');
-    });
-    //token限制代替楼层限制
-    $('#use_token_limit').change(function() {
-        $('#token_limit_container').toggle(this.checked);
-        $('#clear_up_stairs_container').toggle(!this.checked);
-        USER.tableBaseSetting.use_token_limit = this.checked;
-    });
-    // 初始化API设置显示状态
-    $('#use_main_api').change(function() {
-        USER.tableBaseSetting.use_main_api = this.checked;
-    });
-    // 初始化API设置显示状态
-    $('#step_by_step_use_main_api').change(function() {
-        USER.tableBaseSetting.step_by_step_use_main_api = this.checked;
-    });
-    // 根据下拉列表选择的模型更新自定义模型名称
-    $('#model_selector').change(function(event) {
-        $('#custom_model_name').val(event.target.value);
-        USER.IMPORTANT_USER_PRIVACY_DATA.custom_model_name = event.target.value;
-        USER.saveSettings && USER.saveSettings(); // 保存设置
-    });
-    // 表格推送至对话开关
-    $('#table_to_chat').change(function () {
-        USER.tableBaseSetting.isTableToChat = this.checked;
-        EDITOR.success(this.checked ? '表格会被推送至对话中' : '关闭表格推送至对话');
-        $('#table_to_chat_options').toggle(this.checked);
-        updateSystemMessageTableStatus();   // 将表格数据状态更新到系统消息中
-    });
-    // 在扩展菜单栏中显示表格设置开关
-    $('#show_settings_in_extension_menu').change(function () {
-        USER.tableBaseSetting.show_settings_in_extension_menu = this.checked;
-        updateTableView();
-    });
-    // 在扩展菜单栏中显示穿插模型设置开关
-    $('#alternate_switch').change(function () {
-        USER.tableBaseSetting.alternate_switch = this.checked;
-        EDITOR.success(this.checked ? '开启表格渲染穿插模式' : '关闭表格渲染穿插模式');
-        updateTableView();
-        updateAlternateTable();
-    });
-    // 在扩展列表显示表格设置
-    $('#show_drawer_in_extension_list').change(function () {
-        USER.tableBaseSetting.show_drawer_in_extension_list = this.checked;
-        updateTableView();
-    });
-    // 推送至前端的表格数据可被编辑
-    $('#table_to_chat_can_edit').change(function () {
-        USER.tableBaseSetting.table_to_chat_can_edit = this.checked;
-        updateSystemMessageTableStatus();   // 将表格数据状态更新到系统消息中
-    });
-    // 根据下拉列表选择表格推送位置
-    $('#table_to_chat_mode').change(function(event) {
-        USER.tableBaseSetting.table_to_chat_mode = event.target.value;
-        $('#table_to_chat_is_micro_d').toggle(event.target.value === 'macro');
-        updateSystemMessageTableStatus();   // 将表格数据状态更新到系统消息中
-    });
-
-    // 根据下拉列表选择表格推送位置
-    $('#table_cell_width_mode').change(function(event) {
-        USER.tableBaseSetting.table_cell_width_mode = event.target.value;
-        getSheetsCellStyle()
-    });
-
-
-    // API URL
-    $('#custom_api_url').on('input', function() {
-        USER.IMPORTANT_USER_PRIVACY_DATA.custom_api_url = $(this).val();
-        USER.saveSettings && USER.saveSettings(); // 保存设置
-    });
-    // API KEY
-    let apiKeyDebounceTimer;
-    $('#custom_api_key').on('input', function () {
-        clearTimeout(apiKeyDebounceTimer);
-        apiKeyDebounceTimer = setTimeout(async () => {
-            try {
-                const rawKey = $(this).val();
-                const result = processApiKey(rawKey, generateDeviceId());
-                USER.IMPORTANT_USER_PRIVACY_DATA.custom_api_key = result.encryptedResult.encrypted || result.encryptedResult;
-                USER.saveSettings && USER.saveSettings(); // 保存设置
-                EDITOR.success(result.message);
-            } catch (error) {
-                console.error('API Key 处理失败:', error);
-                EDITOR.error('未能获取到API KEY，请重新输入~', error.message, error);
-            }
-        }, 500); // 500ms防抖延迟
-    })
-    // 模型名称
-    $('#custom_model_name').on('input', function() {
-        USER.IMPORTANT_USER_PRIVACY_DATA.custom_model_name = $(this).val();
-        USER.saveSettings && USER.saveSettings(); // 保存设置
-    });
-    // 表格消息模板
-    $('#dataTable_message_template').on("input", function () {
-        const value = $(this).val();
-        USER.tableBaseSetting.message_template = value;
-    })
-    // 表格深度
-    $('#dataTable_deep').on("input", function () {
-        const value = $(this).val();
-        USER.tableBaseSetting.deep = Math.abs(value);
-    })
-    $('#dataTable_short_term_memory').val(USER.tableBaseSetting.short_term_memory ?? 2).on('input', function () {
-        let v = parseInt(this.value, 10);
-        if (isNaN(v) || v < 1) v = 1;
-        this.value = v;
-        USER.tableBaseSetting.short_term_memory = v;
-        USER.saveSettings && USER.saveSettings();
-    });
-    // 分步填表提示词
-    $('#step_by_step_user_prompt').on('input', function() {
-        USER.tableBaseSetting.step_by_step_user_prompt = $(this).val();
-    });
-    // 分步填表读取的上下文层数
-    $('#separateReadContextLayers').on('input', function() {
-        USER.tableBaseSetting.separateReadContextLayers = Number($(this).val());
-    });
-    // 分步填表是否读取世界书
-    $('#separateReadLorebook').change(function() {
-        USER.tableBaseSetting.separateReadLorebook = this.checked;
-        USER.saveSettings && USER.saveSettings();
-    });
-    // 重置分步填表提示词为默认值
-    $('#reset_step_by_step_user_prompt').on('click', function() {
-        const defaultValue = USER.tableBaseDefaultSettings.step_by_step_user_prompt;
-        $('#step_by_step_user_prompt').val(defaultValue);
-        // 同样更新内存中的设置
-        USER.tableBaseSetting.step_by_step_user_prompt = defaultValue;
-        EDITOR.success('分步填表提示词已重置为默认值。');
-    });
-    // 清理聊天记录楼层
-    $('#clear_up_stairs').on('input', function() {
-        const value = $(this).val();
-        $('#clear_up_stairs_value').text(value);
-        USER.tableBaseSetting.clear_up_stairs = Number(value);
-    });
-    // token限制
-    $('#rebuild_token_limit').on('input', function() {
-        const value = $(this).val();
-        $('#rebuild_token_limit_value').text(value);
-        USER.tableBaseSetting.rebuild_token_limit_value = Number(value);
-    });
-    // 模型温度设定
-    $('#custom_temperature').on('input', function() {
-        const value = $(this).val();
-        $('#custom_temperature_value').text(value);
-        USER.tableBaseSetting.custom_temperature = Number(value);
-    });
-
-    // 代理地址
-    $('#table_proxy_address').on('input', function() {
-        USER.IMPORTANT_USER_PRIVACY_DATA.table_proxy_address = $(this).val();
-        USER.saveSettings && USER.saveSettings(); // 保存设置
-    });
-    // 代理密钥
-    $('#table_proxy_key').on('input', function() {
-        USER.IMPORTANT_USER_PRIVACY_DATA.table_proxy_key = $(this).val();
-        USER.saveSettings && USER.saveSettings(); // 保存设置
-    });
-
-    // 获取模型列表
-    $('#fetch_models_button').on('click', updateModelList);
-
-    // 测试API
-    $(document).on('click', '#table_test_api_button',async () => {
-        const apiUrl = $('#custom_api_url').val();
-        const modelName = $('#custom_model_name').val();
-        const encryptedApiKeys = USER.IMPORTANT_USER_PRIVACY_DATA.custom_api_key;
-        const results = await handleApiTestRequest(apiUrl, encryptedApiKeys, modelName);
-    });
-
-    // 开始整理表格
-    $("#table_clear_up").on('click', () => {
-        rebuildSheets()
-    });
-
-    // 完整重建表格（合并到上面的下拉框内）
-    // $('#rebuild_table').on('click', () => rebuildTableActions(USER.tableBaseSetting.bool_force_refresh, USER.tableBaseSetting.bool_silent_refresh));
-
-    // 表格推送至对话
-    $("#dataTable_to_chat_button").on("click", async function () {
-        customSheetsStylePopup()
-    })
-
-    // 重整理模板编辑
-    $("#rebuild--set-rename").on("click", modifyRebuildTemplate)
-    $("#rebuild--set-new").on("click", newRebuildTemplate)
-    $("#rebuild--set-delete").on("click", deleteRebuildTemplate)
-    $("#rebuild--set-export").on("click", exportRebuildTemplate)
-    $("#rebuild--set-import").on("click", importRebuildTemplate)
-    $('#rebuild--select').on('change', function() {
-        USER.tableBaseSetting.lastSelectedTemplate = $(this).val();
-        USER.saveSettings && USER.saveSettings();
-    });
-
-    // 手动触发分步填表
-    $(document).on('click', '#trigger_step_by_step_button', () => {
-        triggerStepByStepNow();
-    });
-
-}
-
-/**
- * 渲染设置
- */
+// 在renderSetting()中，确保在设置 #dataTable_deep 值之后调用这段代码:
 export function renderSetting() {
     // 初始化数值
     $(`#dataTable_injection_mode option[value="${USER.tableBaseSetting.injection_mode}"]`).prop('selected', true);
@@ -604,10 +344,10 @@ export function renderSetting() {
     $(`#table_cell_width_mode option[value="${USER.tableBaseSetting.table_cell_width_mode}"]`).prop('selected', true);
     $('#dataTable_message_template').val(USER.tableBaseSetting.message_template);
     $('#dataTable_deep').val(USER.tableBaseSetting.deep);
-    // ADD: inject short-term memory field here so it exists before InitBinging runs
+    // 注入（或更新）短期记忆行至深度输入框下方
     ensureShortTermMemoryField();
 
-    // Optionally sync its value (in case settings changed)
+    // 再次同步值以防万一
     $('#dataTable_short_term_memory').val(USER.tableBaseSetting.short_term_memory ?? 2);
 
     $('#clear_up_stairs').val(USER.tableBaseSetting.clear_up_stairs);
@@ -616,7 +356,7 @@ export function renderSetting() {
     $('#rebuild_token_limit_value').text(USER.tableBaseSetting.rebuild_token_limit_value);
     $('#custom_temperature').val(USER.tableBaseSetting.custom_temperature);
     $('#custom_temperature_value').text(USER.tableBaseSetting.custom_temperature);
-    // Load step-by-step user prompt
+    // 加载分步填表提示词
     $('#step_by_step_user_prompt').val(USER.tableBaseSetting.step_by_step_user_prompt || '');
     // 分步填表读取的上下文层数
     $('#separateReadContextLayers').val(USER.tableBaseSetting.separateReadContextLayers);
@@ -625,7 +365,7 @@ export function renderSetting() {
     $("#fill_table_time").val(USER.tableBaseSetting.step_by_step ? 'after' : 'chat');
     refreshRebuildTemplate()
 
-    // private data
+    // 私有数据
     $('#custom_api_url').val(USER.IMPORTANT_USER_PRIVACY_DATA.custom_api_url || '');
     $('#custom_api_key').val(USER.IMPORTANT_USER_PRIVACY_DATA.custom_api_key || '');
     $('#custom_model_name').val(USER.IMPORTANT_USER_PRIVACY_DATA.custom_model_name || '');
@@ -667,11 +407,11 @@ export function renderSetting() {
 export function loadSettings() {
     USER.IMPORTANT_USER_PRIVACY_DATA = USER.IMPORTANT_USER_PRIVACY_DATA || {};
 
-    // Check if migration is needed (increment updateIndex to 5)
+    // 检查是否需要迁移（将 updateIndex 增加到 5）
     if (USER.tableBaseSetting.updateIndex < 5) {
-        console.log("Triggering migration to new Memory Table format");
+        console.log("触发迁移到新记忆表格格式");
         
-        // Clear any existing problematic data
+        // 清除任何现有的问题数据
         if (USER.getContext().chatMetadata?.sheets) {
             USER.getContext().chatMetadata.sheets = [];
         }
@@ -679,14 +419,14 @@ export function loadSettings() {
         try {
             initTableStructureToTemplate();
             USER.tableBaseSetting.updateIndex = 5;
-            console.log("Migration completed successfully");
+            console.log("迁移成功");
         } catch (error) {
-            console.error("Migration failed:", error);
-            EDITOR.error("Table migration failed. Please check console for details.", error.message, error);
+            console.error("迁移失败:", error);
+            EDITOR.error("表格迁移失败。详情请查看控制台.", error.message, error);
         }
     }
 
-    // Initialize default for new setting if missing
+    // 如果缺少新设置的默认值，则初始化
     if (typeof USER.tableBaseSetting.short_term_memory !== 'number') {
         USER.tableBaseSetting.short_term_memory = 2;
     }
@@ -704,19 +444,19 @@ export function initTableStructureToTemplate() {
     try {
         const sheetDefaultTemplates = USER.tableBaseSetting.tableStructure || [];
         
-        // Clear existing templates to avoid conflicts
+        // 清除现有模板以避免冲突
         USER.getSettings().table_selected_sheets = []
         USER.getSettings().table_database_templates = [];
         
-        // If no old structure exists, create the new default Memory Table template
+        // 如果不存在旧结构，则创建新的默认记忆表模板
         if (sheetDefaultTemplates.length === 0) {
-            console.log("No existing table structure found, creating default Memory Table template");
+            console.log("未找到现有表结构，创建默认的记忆表模板");
             createDefaultMemoryTableTemplate();
             USER.saveSettings();
             return;
         }
         
-        // Check if we already have the new Memory Table structure
+        // 检查是否已经有新的记忆表结构
         const existingMemoryTable = sheetDefaultTemplates.find(template => 
             template.tableName === "Memory Table" || 
             template.columns?.includes("Place") && template.columns?.includes("Characters") && 
@@ -724,31 +464,31 @@ export function initTableStructureToTemplate() {
         );
         
         if (existingMemoryTable) {
-            console.log("Memory Table template already exists, using existing structure");
+            console.log("记忆表模板已存在，使用现有结构");
             processExistingTemplate(existingMemoryTable);
             USER.saveSettings();
             return;
         }
         
-        // Migrate from old Chinese structure to new English structure
-        console.log("Migrating from old table structure to new Memory Table format");
+        // 从旧的中文结构迁移到新的英文结构
+        console.log("迁移旧的表结构到新的记忆表格式");
         
-        // Instead of migrating multiple tables, create a single Memory Table
+        // 不再迁移多个表，创建一个单一的记忆表
         createDefaultMemoryTableTemplate();
         
-        // Optionally preserve old data by merging it (you can customize this logic)
+        // 可选择地通过合并旧数据来保留旧数据（您可以自定义此逻辑）
         // migrateOldTableData(sheetDefaultTemplates);
         
         USER.saveSettings();
         
     } catch (error) {
-        console.error("Migration failed, creating default Memory Table:", error);
+        console.error("迁移失败，创建默认记忆表模板时发生错误:", error);
         try {
             createDefaultMemoryTableTemplate();
             USER.saveSettings();
         } catch (fallbackError) {
-            console.error("Failed to create default template:", fallbackError);
-            EDITOR.error("Failed to initialize table templates. Please check your settings.", fallbackError.message, fallbackError);
+            console.error("创建默认模板失败:", fallbackError);
+            EDITOR.error("初始化表格模板失败。请检查您的设置.", fallbackError.message, fallbackError);
         }
     }
 }
@@ -759,7 +499,7 @@ function createDefaultMemoryTableTemplate() {
     newTemplate.createNewTemplate(5, 1, false); // 4 columns + header
     newTemplate.name = 'Memory Table';
     
-    // Set column headers
+    // 设置列标题
     const headerCells = newTemplate.getCellsByRowIndex(0);
     if (headerCells.length >= 5) {
         headerCells[1].data.value = 'Place';
@@ -783,7 +523,7 @@ function createDefaultMemoryTableTemplate() {
     USER.getSettings().table_selected_sheets.push(newTemplate.uid);
     newTemplate.save();
     
-    console.log("Created default Memory Table template:", newTemplate);
+    console.log("创建默认记忆表模板:", newTemplate);
 }
 
 function processExistingTemplate(template) {
@@ -852,25 +592,25 @@ export function refreshRebuildTemplate() {
 
     templateSelect.empty(); // 清空现有选项
 
-    // Add default option
+    // 添加默认选项
     const defaultOption = $('<option>', {
         value: "rebuild_base",
-        text: "Default Template",
+        text: "默认模板",
     });
     templateSelect.append(defaultOption);
 
-    // Add templates from profile_prompts.js
+    // 从 profile_prompts.js 添加模板
     import('../../data/profile_prompts.js').then(({ profile_prompts }) => {
         Object.entries(profile_prompts).forEach(([key, value]) => {
-            if (key !== 'rebuild_base') { // Skip default as we already added it
+            if (key !== 'rebuild_base') { // 跳过默认值，因为我们已经添加了它
                 const option = $('<option>', {
                     value: key,
                     text: (() => {
                         switch (value.type) {
                             case 'refresh':
-                                return '**Old** ' + (value.name || key);
+                                return '**旧版** ' + (value.name || key);
                             case 'third_party':
-                                return '**Third Party** ' + (value.name || key);
+                                return '**第三方** ' + (value.name || key);
                             default:
                                 return value.name || key;
                         }
@@ -880,27 +620,27 @@ export function refreshRebuildTemplate() {
             }
         });
 
-        // Add custom templates
+        // 添加自定义模板
         const customTemplates = USER.tableBaseSetting.rebuild_message_template_list || {};
         Object.keys(customTemplates).forEach(key => {
             const template = customTemplates[key];
             const option = $('<option>', {
                 value: key,
-                text: '**Custom** ' + (template.name || key)
+                text: '**自定义** ' + (template.name || key)
             });
             templateSelect.append(option);
         });
 
-        // Set default selected item
+        // 设置默认选定项
         const lastSelected = USER.tableBaseSetting.lastSelectedTemplate;
         if (lastSelected) {
-            console.log("Setting default selection:", lastSelected);
+            console.log("设置默认选择项:", lastSelected);
             templateSelect.val(lastSelected);
         }
     }).catch(error => {
-        console.error('Failed to load profile_prompts:', error);
+        console.error('加载 profile_prompts 失败:', error);
         
-        // Fallback: Add custom templates only
+        // 回退：仅添加自定义模板
         const customTemplates = USER.tableBaseSetting.rebuild_message_template_list || {};
         Object.keys(customTemplates).forEach(key => {
             const template = customTemplates[key];
@@ -911,7 +651,7 @@ export function refreshRebuildTemplate() {
             templateSelect.append(option);
         });
 
-        // Set default selected item
+        // 设置默认选定项
         const lastSelected = USER.tableBaseSetting.lastSelectedTemplate;
         if (lastSelected) {
             templateSelect.val(lastSelected);
