@@ -17,7 +17,7 @@ import { Cell } from "./core/table/cell.js";
 
 
 // ADD import for hiding messages (best-effort; wrapped in try/catch if path differs)
-import { hideChatMessageRange } from '../../../../chats.js'; // If path differs in your environment, adjust accordingly.
+import { hideChatMessageRange } from '../../../chats.js'; // If path differs in your environment, adjust accordingly.
 
 console.log("______________________记忆插件：开始加载______________________")
 
