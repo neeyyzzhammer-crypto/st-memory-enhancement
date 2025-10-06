@@ -133,7 +133,7 @@ export function convertOldTablesToNewSheets(oldTableList, targetPiece) {
 // PATCH: assistant-based short-term memory — keep ONLY last N assistant messages + their preceding user messages
 async function applyShortTermMemoryWindow(nOverride) {
     try {
-        const rawN = typeof nOverride === 'number'
+        rawN = typeof nOverride === 'number'
             ? nOverride
             : (parseInt(USER.tableBaseSetting.short_term_memory) || 0);
 
