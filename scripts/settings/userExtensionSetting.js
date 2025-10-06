@@ -665,6 +665,22 @@ export function renderSetting() {
     $('#dataTable_short_term_memory').val(USER.tableBaseSetting.short_term_memory ?? 2);
     $('#dataTable_critical_thinking_memory').val(USER.tableBaseSetting.critical_thinking_memory ?? 1);
 
+    // 2. In InitBinging() add (near other input bindings):
+    $('#dataTable_short_term_memory').on('input', function () {
+        let v = parseInt(this.value, 10);
+        if (isNaN(v) || v < 0) v = 0;
+        this.value = v;
+        USER.tableBaseSetting.short_term_memory = v;
+        USER.saveSettings && USER.saveSettings();
+    });
+    $('#dataTable_critical_thinking_memory').on('input', function () {
+        let v = parseInt(this.value, 10);
+        if (isNaN(v) || v < 0) v = 0;
+        this.value = v;
+        USER.tableBaseSetting.critical_thinking_memory = v;
+        USER.saveSettings && USER.saveSettings();
+    });
+
     $('#clear_up_stairs').val(USER.tableBaseSetting.clear_up_stairs);
     $('#clear_up_stairs_value').text(USER.tableBaseSetting.clear_up_stairs);
     $('#rebuild_token_limit').val(USER.tableBaseSetting.rebuild_token_limit_value);
@@ -745,7 +761,6 @@ export function loadSettings() {
     if (typeof USER.tableBaseSetting.short_term_memory !== 'number') {
         USER.tableBaseSetting.short_term_memory = 2;
     }
-
     if (typeof USER.tableBaseSetting.critical_thinking_memory !== 'number') {
         USER.tableBaseSetting.critical_thinking_memory = 1;
     }
