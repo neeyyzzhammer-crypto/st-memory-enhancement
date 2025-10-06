@@ -148,23 +148,85 @@ export function findNextChatWhitTableData(startIndex, isIncludeStartIndex = fals
     }
     return { index: -1, chat: null };
 }
+/* === PATCH: Full Memory Table injection with Cognitive Impact migration ===
+   Add this block (only once) anywhere above initTableData (e.g. near other helper funcs).
+*/
+function _migrateAndExportFullMemoryTable(piece) {
+    if (!piece?.hash_sheets) return '';
+    const sheets = BASE.hashSheetsToSheets(piece.hash_sheets)
+        .filter(s => s && s.name === 'Memory Table' && s.enable && s.sendToContext !== false);
+    if (!sheets.length) return '';
 
+    const ALL_LINES = [];
+    sheets.forEach((sheet, si) => {
+        // Header
+        const headerRow = sheet.getCellsByRowIndex(0).slice(1);
+        let headers = headerRow.map(c => c.data.value || '');
+        let impactIndex = headers.indexOf('Cognitive Impact');
+        if (impactIndex === -1) {
+            headers.push('Cognitive Impact');
+            impactIndex = headers.length - 1;
+        }
+        ALL_LINES.push(`[${si}:${sheet.name}]`);
+        ALL_LINES.push(headers.join(' | '));
+
+        // Body rows
+        for (let r = 1; r < sheet.getRowCount(); r++) {
+            const cells = sheet.getCellsByRowIndex(r).slice(1);
+            const rowValues = cells.map(c => (c.data.value ?? '').toString());
+            // Pad in case column count increased
+            while (rowValues.length < headers.length) rowValues.push('');
+            // Fill Cognitive Impact default if empty
+            if (!rowValues[impactIndex] || !rowValues[impactIndex].trim()) {
+                rowValues[impactIndex] = 'high';
+                // Persist change into sheet cell if physically exists
+                if (impactIndex < cells.length) {
+                    cells[impactIndex].data.value = 'high';
+                }
+            }
+            ALL_LINES.push(rowValues.join(' | '));
+        }
+        ALL_LINES.push('');
+        // Save sheet if any modifications were applied
+        sheet.save(piece, true);
+    });
+
+    return ALL_LINES.join('\n').trim();
+}
 /**
  * 生成表格总体提示词
  */
+/* === PATCH: Replace existing initTableData with this version === */
 export function initTableData(eventData) {
     const template = USER.tableBaseSetting.message_template || '';
-    const tableData = getTablePrompt(eventData);
+    // Prefer reference piece, fallback to last with sheets
+    const piece =
+        (BASE.getReferencePiece && BASE.getReferencePiece()) ||
+        (function () {
+            const chat = USER.getContext()?.chat || [];
+            for (let i = chat.length - 1; i >= 0; i--) {
+                if (chat[i]?.hash_sheets) return chat[i];
+            }
+            return null;
+        })();
+
+    let tableData = '';
+    if (piece) {
+        // Use full Memory Table export (all rows) with migration
+        tableData = _migrateAndExportFullMemoryTable(piece);
+        // Fallback: if memory table absent, keep previous generic behavior
+        if (!tableData) {
+            tableData = getTablePromptByPiece(piece, false);
+        }
+    }
+
     const replaced = template.replace(/{{tableData}}/g, tableData);
     if (!template.includes('{{tableData}}')) {
-        console.warn('[Memory Enhancement] message_template does not contain {{tableData}} placeholder.');
-    } else if (replaced === template) {
-        console.warn('[Memory Enhancement] {{tableData}} placeholder present but no replacement occurred (tableData empty).');
-    } else {
-        console.debug('[Memory Enhancement] {{tableData}} successfully populated. Length:', tableData.length);
+        console.warn('[Memory Enhancement] message_template missing {{tableData}}.');
+    } else if (!tableData) {
+        console.warn('[Memory Enhancement] Memory Table export empty (no rows or no table).');
     }
-    const promptContent = replaceUserTag(replaced);
-    return promptContent;
+    return replaceUserTag(replaced);
 }
 
 /**
