@@ -204,6 +204,62 @@ export function getTablePrompt(eventData, isPureData = false) {
 }
 
 /**
+ * Internal fallback: locate a piece that still has hash_sheets when BASE.getReferencePiece() is null.
+ */
+function _findFallbackSheetsPiece() {
+    try {
+        if (USER.getChatPiece) {
+            const { piece } = USER.getChatPiece() || {};
+            if (piece?.hash_sheets) return piece;
+        }
+        const chat = USER.getContext()?.chat || [];
+        for (let i = chat.length - 1; i >= 0; i--) {
+            if (chat[i] && chat[i].hash_sheets) return chat[i];
+        }
+    } catch (e) {
+        console.warn('[Memory Enhancement] _findFallbackSheetsPiece failed:', e);
+    }
+    return null;
+}
+
+/**
+ * Re‑added: Build table prompt text from a specific piece.
+ * @param {Object} piece Chat piece containing hash_sheets
+ * @param {boolean} isPureData If true, only include minimal data sections
+ * @returns {string}
+ */
+export function getTablePromptByPiece(piece, isPureData = false) {
+    if (!piece || !piece.hash_sheets) return '';
+    try {
+        const sheets = BASE.hashSheetsToSheets(piece.hash_sheets)
+            .filter(sheet => sheet?.enable)
+            .filter(sheet => sheet.sendToContext !== false);
+
+        if (!sheets.length) return '';
+
+        // Decide which table text sections to include
+        const customParts = isPureData
+            ? ['title', 'headers', 'rows']
+            : ['title', 'node', 'headers', 'rows', 'editRules'];
+
+        return sheets
+            .map((sheet, index) => {
+                try {
+                    return sheet.getTableText(index, customParts, piece);
+                } catch (e) {
+                    console.warn('[Memory Enhancement] getTableText failed for sheet', sheet?.name, e);
+                    return '';
+                }
+            })
+            .filter(Boolean)
+            .join('\n');
+    } catch (err) {
+        console.error('[Memory Enhancement] getTablePromptByPiece error:', err);
+        return '';
+    }
+}
+
+/**
  * 解析表格编辑函数
  */
 function handleTableEditTag(matches) {
