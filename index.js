@@ -141,28 +141,19 @@ async function applyShortTermMemoryWindow(nOverride) {
         if (!Array.isArray(chat) || chat.length === 0) return;
         rawN *= 2; // account for user-assistant pairs
         // Show all if disabled
-        if (rawN < 0) {            
+        if (rawN < 0 || chat.length <= rawN) {            
             return;
         }
-
+        
         // Collect indices
         const overallIdx = [];
-        for (let i = 0; i < chat.length; i++) {
-            if (chat[i]) overallIdx.push(i);
+        for (let i = chat.length; i >= chat.length - rawN; i++) {
+            promises.push(hideChatMessageRange(i, i, true));
         }
-
-        // If messages fewer/equal than N => show all
-        if (overallIdx.length <= rawN) {            
-            return;
-        }
-
-        // Last N indices
-        const notLastN = overallIdx.slice(0, overallIdx.length - rawN);
-        // Determine earliest index among kept messages
-        const earliestHide = Math.min(...notLastN);
-        const latestHide = Math.max(...notLastN);
-        ops.push(hideChatMessageRange(earliestHide, latestHide, true));        
-        await Promise.all(ops);
+        for (let i = chat.length - rawN; i >= 0; i++) {
+            promises.push(hideChatMessageRange(i, i, false));
+        }        
+        await Promise.all(promises);
     } catch (e) {
         console.warn('[ShortTermMemory] Failed (assistant+preceding-user mode):', e);
     }
