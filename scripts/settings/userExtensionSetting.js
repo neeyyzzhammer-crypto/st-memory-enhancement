@@ -282,6 +282,45 @@ async function resetSettings() {
     }
 }
 
+function ensureShortTermMemoryField() {
+    const $deepInput = $('#dataTable_deep');
+    if (!$deepInput.length) return;
+
+    // Avoid duplicate insertion
+    if ($('#dataTable_short_term_memory').length) return;
+
+    // Wrap existing deep input (if not already wrapped) for consistent layout
+    if (!$deepInput.parent().hasClass('short-term-memory-wrapper')) {
+        $deepInput.wrap('<div class="short-term-memory-wrapper" style="display:flex;align-items:center;gap:8px;margin-top:4px;"></div>');
+    }
+
+    // Create new label + input (clone size/style from deep input)
+    const deepWidth = $deepInput.outerWidth();
+    const deepClass = $deepInput.attr('class') || 'text_pole';
+
+    const $label = $('<label>', {
+        text: 'Short-term memory',
+        for: 'dataTable_short_term_memory',
+        style: 'white-space:nowrap;'
+    });
+
+    const $input = $('<input>', {
+        id: 'dataTable_short_term_memory',
+        type: 'number',
+        min: 1,
+        value: USER.tableBaseSetting.short_term_memory ?? 2,
+        class: deepClass,
+        style: `width:${deepWidth}px;`
+    });
+
+    $deepInput.parent().after(
+        $('<div>', {
+            class: 'short-term-memory-container',
+            style: 'display:flex;align-items:center;gap:8px;margin-top:6px;'
+        }).append($label, $input)
+    );
+}
+
 function InitBinging() {
     console.log('初始化绑定')
     // 开始绑定事件
@@ -632,6 +671,11 @@ export function loadSettings() {
             console.error("Migration failed:", error);
             EDITOR.error("Table migration failed. Please check console for details.", error.message, error);
         }
+    }
+
+    // Initialize default for new setting if missing
+    if (typeof USER.tableBaseSetting.short_term_memory !== 'number') {
+        USER.tableBaseSetting.short_term_memory = 2;
     }
 
     if (USER.tableBaseSetting.deep < 0) formatDeep();

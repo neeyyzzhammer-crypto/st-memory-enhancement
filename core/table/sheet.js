@@ -365,9 +365,10 @@ export class Sheet extends SheetBase {
     }
     /**
      * Create a default Memory Table when migration fails
+     * (Updated: add Cognitive Impact column)
      */
     createDefaultMemoryTable() {
-        this.init(5, 1); // 4 columns + 1 row header, 1 data row
+        this.init(6, 1); // 5 columns + 1 header row
         this.uid = `sheet_${SYSTEM.generateRandomString(8)}`;
         this.name = 'Memory Table';
         this.domain = 'chat';
@@ -376,32 +377,30 @@ export class Sheet extends SheetBase {
         this.required = true;
         this.triggerSend = true;
         this.triggerSendDeep = 3;
-        
-        // Set up the default Memory Table structure
+
         const headerCells = this.getCellsByRowIndex(0);
-        if (headerCells.length >= 5) {
+        if (headerCells.length >= 6) {
             headerCells[1].data.value = 'Place';
-            headerCells[2].data.value = 'Characters'; 
+            headerCells[2].data.value = 'Characters';
             headerCells[3].data.value = 'Keys';
             headerCells[4].data.value = 'Content';
+            headerCells[5].data.value = 'Cognitive Impact';
         }
-        
-        // Set up prompts and notes
+
         this.source.data = {
-            note: 'Single memory table storing all contextual information with place, characters, keywords, and content descriptions',
+            note: 'Single memory table storing all contextual information with place, characters, keywords, content descriptions, and cognitive impact (low/medium/high)',
             initNode: 'This round must search for events from the context and insert them using insertRow function',
             insertNode: 'When new significant events, character interactions, or location changes occur',
             updateNode: 'When existing entries need content updates or clarification',
             deleteNode: 'When entries become irrelevant or outdated'
         };
-        
+
         this.loadCells();
         this.markPositionCacheDirty();
     }
 
     /**
      * 获取表格编辑规则提示词
-     * @returns
      */
     #getTableEditRules() {
         const source = this.source;

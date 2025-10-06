@@ -16,6 +16,9 @@ import {SheetBase} from "./core/table/base.js";
 import { Cell } from "./core/table/cell.js";
 
 
+// ADD import for hiding messages (best-effort; wrapped in try/catch if path differs)
+import { hideChatMessageRange } from '../../../../chats.js'; // If path differs in your environment, adjust accordingly.
+
 console.log("______________________记忆插件：开始加载______________________")
 
 const VERSION = '2.2.0'
@@ -539,28 +542,53 @@ function getMesRole() {
  * @param {*} eventData
  * @returns
  */
-// REPLACE the existing onChatCompletionPromptReady with this version
+// REPLACE the existing onChatCompletionPromptReady with this updated version
 async function onChatCompletionPromptReady(eventData) {
     try {
-        // 优先处理分步填表模式
-        if (USER.tableBaseSetting.step_by_step === true) {
-            // 仅当插件和AI读表功能开启,注入模式不是关闭注入时才注入
-            if (USER.tableBaseSetting.isExtensionAble === true && USER.tableBaseSetting.isAiReadTable === true && USER.tableBaseSetting.injection_mode !== "injection_off") {
-                const tableData = getTablePrompt(eventData, true); // 获取纯净数据
-                if (tableData) { // 确保有内容可注入
-                    const finalPrompt = `以下是通过表格记录的当前场景信息以及历史记录信息，你需要以此为参考进行思考：\n${tableData}`;
-                    if (USER.tableBaseSetting.deep === 0) {
-                        eventData.chat.push({ role: getMesRole(), content: finalPrompt });
-                    } else {
-                        eventData.chat.splice(-USER.tableBaseSetting.deep, 0, { role: getMesRole(), content: finalPrompt });
+        // Short-term memory trimming BEFORE any injection (only if enabled & >0)
+        const stm = USER.tableBaseSetting.short_term_memory ?? 2;
+        if (stm > 0 && Array.isArray(eventData.chat)) {
+            // Keep last stm messages only (do not include system-injected ones yet)
+            if (eventData.chat.length > stm) {
+                const removedCount = eventData.chat.length - stm;
+                // Attempt to hide older messages in UI / system so they are excluded from model prompt
+                try {
+                    const contextChat = USER.getContext().chat || [];
+                    const lastIdx = contextChat.length - 1;
+                    const firstKeptGlobalIndex = lastIdx - (stm - 1);
+                    const promises = [];
+                    for (let i = 0; i < firstKeptGlobalIndex; i++) {
+                        // Hide each old message (best-effort)
+                        promises.push(hideChatMessageRange(i, i, true));
                     }
+                    if (promises.length) await Promise.allSettled(promises);
+                } catch (e) {
+                    console.warn('[Short-term memory] hideChatMessageRange failed or unavailable:', e);
+                }
+                // Trim prompt array itself
+                eventData.chat = eventData.chat.slice(-stm);
+                console.log(`[Short-term memory] Trimmed prompt messages. Removed: ${removedCount}, Kept: ${stm}`);
+            }
+        }
+
+        // Step-by-step logic (unchanged except executed after STM trim)
+        if (USER.tableBaseSetting.step_by_step === true) {
+            if (USER.tableBaseSetting.isExtensionAble === true &&
+                USER.tableBaseSetting.isAiReadTable === true &&
+                USER.tableBaseSetting.injection_mode !== "injection_off") {
+                const tableData = getTablePrompt(eventData, true);
+                if (tableData) {
+                    const finalPrompt = `以下是通过表格记录的当前场景信息以及历史记录信息，你需要以此为参考进行思考：\n${tableData}`;
+                    const insertionIndex = USER.tableBaseSetting.deep === 0
+                        ? eventData.chat.length
+                        : Math.max(0, eventData.chat.length - USER.tableBaseSetting.deep);
+                    eventData.chat.splice(insertionIndex, 0, { role: getMesRole(), content: finalPrompt });
                     console.log("分步填表模式：注入只读表格数据", eventData.chat);
                 }
             }
-            return; // 分步模式直接退出
+            return;
         }
 
-        // 常规模式的注入逻辑
         if (eventData.dryRun === true ||
             USER.tableBaseSetting.isExtensionAble === false ||
             USER.tableBaseSetting.isAiReadTable === false ||
@@ -568,16 +596,13 @@ async function onChatCompletionPromptReady(eventData) {
             return;
         }
 
-        console.log("生成提示词前", USER.getContext().chat)
+        console.log("生成提示词前", USER.getContext().chat);
 
-        // Build both prompts
-        const thinkingContent = initThinkingData(eventData); // thinking_template with <previous_thinking> replaced
-        const promptContent = initTableData(eventData);      // message_template with {{tableData}} replaced
-
+        const thinkingContent = initThinkingData(eventData);
+        const promptContent = initTableData(eventData);
         const role = getMesRole();
         const inserts = [];
 
-        // Inject thinking_template first, then message_template (same role, same depth)
         if (thinkingContent && thinkingContent.trim().length > 0) {
             inserts.push({ role, content: thinkingContent });
         }
@@ -586,18 +611,17 @@ async function onChatCompletionPromptReady(eventData) {
         }
 
         if (inserts.length > 0) {
-            if (USER.tableBaseSetting.deep === 0) {
-                eventData.chat.push(...inserts);
-            } else {
-                eventData.chat.splice(-USER.tableBaseSetting.deep, 0, ...inserts);
-            }
+            const insertionIndex = USER.tableBaseSetting.deep === 0
+                ? eventData.chat.length
+                : Math.max(0, eventData.chat.length - USER.tableBaseSetting.deep);
+            eventData.chat.splice(insertionIndex, 0, ...inserts);
         }
 
-        updateSheetsView()
+        updateSheetsView();
     } catch (error) {
         EDITOR.error(`记忆插件：表格数据注入失败\n原因：`, error.message, error);
     }
-    console.log("注入表格总体提示词 + 思考提示词", eventData.chat)
+    console.log("注入表格总体提示词 + 思考提示词 (含短期记忆裁剪)", eventData.chat);
 }
 
 /**
