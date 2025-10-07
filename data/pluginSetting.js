@@ -192,18 +192,14 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
             3. **PLANNING PHASE**
             -Using constructed character cognition matrix now construct a clear and cohesive chain of thought based on the following instructions: Identify the core objective of the task, break it into sequential logical steps, analyze dependencies between components, and outline a reasoned approach to achieve the goal. Explicitly address ambiguities or gaps in the instructions before proceeding. Using contructed chain of thought outline and write down current and long-term plans of action.
 
-            Current Plan:
-            - Clearly outline the character’s immediate course of action or intention, Follow the next rules:
-            - Describe details in ordered md-list format
-            - There should be 2-4 points.
+            Core Goals:
+            - Clearly outline the character’s core goals and ambitions that define character's life, they rarely change with time.
+            - Outline chain of tasks for character to follow to achieve these core goals, around 5-8 points, these tasks change with time and context.
 
-            Long-Term Plan:
-            - Clearly describe the character’s overarching goals or ambitions, if applicable.  Follow the next rules:
-            - Describe details in ordered md-list format
+            Current plan:
+            - Clearly outline the character’s immediate goals and ambitions that define character's actions in current situation, consider necessary tasks outlined for core goals achievement.
+            - Outline details in ordered md-list format
             - There should be 2-4 points
-            - If not applicable, omit this section entirely without acknowledgment.
-
-
 
             4. **OUTPUT FORMAT**
             *  Write ONLY {{char}}'s internal thoughts, what {{char}} has percieved, all **primary drives** and **core features** perspectives/debates and *Values* and their change and plans, nothing else.  No external narration. Write only internal thoughts, don't describe {{char }'s actions or surrounding, ommit  {{char}}'s actions or descriptions of external actions that are outside of {{char}}'s mind.
