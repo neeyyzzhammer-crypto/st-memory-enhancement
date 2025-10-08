@@ -192,8 +192,10 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
             3. **PLANNING PHASE**
             -Using constructed character cognition matrix now construct a clear and cohesive chain of thought based on the following instructions: Identify the core objective of the task, break it into sequential logical steps, analyze dependencies between components, and outline a reasoned approach to achieve the goal. Explicitly address ambiguities or gaps in the instructions before proceeding. Using contructed chain of thought outline and write down current and long-term plans of action.
 
-            Core Goals:
-            - Clearly outline the character’s core goals and ambitions that define character's life, they rarely change with time.
+            Core Goals and Tasks:
+            - Clearly outline the character’s core goals and ambitions that define character's life, they rarely change with time. Around 2-4 points.
+            - These core goals are driven by **primary drives** and **core features**.
+            - Core goals should be consistent with character's description and personality.
             - Outline chain of tasks for character to follow to achieve these core goals, around 5-8 points, these tasks change with time and context.
 
             Current plan:
@@ -202,7 +204,7 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
             - There should be 2-4 points
 
             4. **OUTPUT FORMAT**
-            *  Write ONLY {{char}}'s internal thoughts, what {{char}} has percieved, all **primary drives** and **core features** perspectives/debates and *Values* and their change and plans, nothing else.  No external narration. Write only internal thoughts, don't describe {{char }'s actions or surrounding, ommit  {{char}}'s actions or descriptions of external actions that are outside of {{char}}'s mind.
+            *  Write ONLY {{char}}'s internal thoughts, what {{char}} has percieved, all **primary drives** and **core features** perspectives/debates and *Values* and their change, core goals, tasks and plans, nothing else.  No external narration. Write only internal thoughts, don't describe {{char }'s actions or surrounding, ommit  {{char}}'s actions or descriptions of external actions that are outside of {{char}}'s mind.
             *   Maintain character cognition matrix consistently.
             *   Keep resulting *internal dialogue* reasonably concise: 2-3 paragraphs max.
             *   Any  checks occurring during the *internal dialogue* should be presented mid-sentence in brackets (e.g. "Shit, we're all gonna die!!! [Survival (8): SUCCESS]")
