@@ -237,12 +237,16 @@ export class Sheet extends SheetBase {
         console.log('获取表格内容提示词', this)
         if (this.triggerSend && this.triggerSendDeep < 1) return ''; // 如果触发深度=0，则不发送，可以用作信息一览表
         const title = `* ${index}:${this.name}\n`;
-        const node = this.source.data.note && this.source.data.note !== '' ? '【说明】' + this.source.data.note + '\n' : '';
-        const headers = "rowIndex," + this.getCellsByRowIndex(0).slice(1).map((cell, index) => index + ':' + cell.data.value).join(',') + '\n';
+        const sourceData = this.source?.data || {};
+        const node = sourceData.note && sourceData.note !== '' ? '【说明】' + sourceData.note + '\n' : '';
+        const headerCells = this.getCellsByRowIndex(0);
+        const headers = "rowIndex," + headerCells
+            .slice(1)
+            .map((cell, index) => index + ':' + (cell?.data?.value ?? ''))
+            .join(',') + '\n';
         let rows = this.getSheetCSV()
         const editRules = this.#getTableEditRules() + '\n';
         // 新增触发式表格内容发送，检索聊天内容的角色名
-
 
         if (rows && this.triggerSend) {
             const chats = USER.getContext().chat;
