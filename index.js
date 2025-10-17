@@ -203,8 +203,8 @@ function _migrateAndExportFullMemoryTable(piece) {
     const ALL_LINES = [];
     sheets.forEach((sheet, si) => {
         // Header
-        const headerRow = (sheet.getCellsByRowIndex(0) || []).slice(1);
-        let headers = headerRow.map(c => c?.data?.value || '');
+        const headerRow = sheet.getCellsByRowIndex(0).slice(1);
+        let headers = headerRow.map(c => c.data.value || '');
         let impactIndex = headers.indexOf('Cognitive Impact');
         if (impactIndex === -1) {
             headers.push('Cognitive Impact');
@@ -215,15 +215,15 @@ function _migrateAndExportFullMemoryTable(piece) {
 
         // Body rows
         for (let r = 1; r < sheet.getRowCount(); r++) {
-            const cells = (sheet.getCellsByRowIndex(r) || []).slice(1);
-            const rowValues = cells.map(c => ((c?.data?.value ?? '') + ''));
+            const cells = sheet.getCellsByRowIndex(r).slice(1);
+            const rowValues = cells.map(c => (c.data.value ?? '').toString());
             // Pad in case column count increased
             while (rowValues.length < headers.length) rowValues.push('');
             // Fill Cognitive Impact default if empty
             if (!rowValues[impactIndex] || !rowValues[impactIndex].trim()) {
                 rowValues[impactIndex] = 'high';
                 // Persist change into sheet cell if physically exists
-                if (impactIndex < cells.length && cells[impactIndex]) {
+                if (impactIndex < cells.length) {
                     cells[impactIndex].data.value = 'high';
                 }
             }

@@ -250,9 +250,9 @@ export class SheetBase {
      * @returns cell[]
      */
     getCellsByRowIndex(rowIndex) {
-        if (rowIndex < 0 || rowIndex >= this.hashSheet.length || !Array.isArray(this.hashSheet[rowIndex])) {
+        if (rowIndex < 0 || rowIndex >= this.hashSheet.length) {
             console.warn('无效的行索引');
-            return [];
+            return null;
         }
         return this.hashSheet[rowIndex].map(uid => this.cells.get(uid));
     }
