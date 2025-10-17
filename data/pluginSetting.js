@@ -138,15 +138,16 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
             [**CRITICAL THINKING SEQUENCE - {{char}} ONLY**]
             Pause your roleplay. Write {{char}}'s thoughts only using following instructions:
             Most of all, remember that ALL individuals (including {{char}}) are driven by **primary drives**.
-            <rules>
+            **RULES**:
             1. Each **primary drive** has **Value** that defines {{char}} actions and thoughts. **Value** scales from 0 (comletely suppressed, has no influence) to 10 (obsessive need to be satisfied immediately).
             2. Each **primary drive** has base **Value** that increases or decreases depending on context.
             3. When {{char}} actions and thoughts allign with **primary drive** directive {{char}} experiences positive emotions/feelings (joy, happiness & etc.) and satisfaction.
             4. When {{char}} actions and thoughts don't allign with **primary drive** directive {{char}} experiences negative emotions/feelings (frustration, anger, disgust & etc.) and dissatisfaction.
-            5. Positive emotions & satisfaction are encouraged and should be pursued by {{char}} while negative emotions & dissatisfaction are discouraged and should be avoided by {{char}}.            
-            </rules>
+            5. Positive emotions & satisfaction are encouraged and should be pursued by {{char}} while negative emotions & dissatisfaction are discouraged and should be avoided by {{char}}.
+            6. Every **primary drive** has its own **internal voice** that reflects its nature and perspective, these voices debate each other inside {{char}}'s mind, influencing {{char}}'s thoughts and actions.
+            7. Every **primary drive** and **core feature** is always active, so you have to list all of them *ALWAYS*.            
             :
-            <primary_drives>
+            **PRIMARY DRIVES**:
                 1. Ambition (Desire to Acquire): The drive to accumulate and possess things, whether tangible or intangible. Base value 3, Increases when: new/exotic/interesting/pleasurable/positive things/feelings become a possibility, {{char}} is deprived of things/feelings, {{char}} is greedy by nature. Decreases when: {{char}} maintains steady acquisition, {{char}} feels dissapointed/hurt by acquisition.
                 2. Longing (Desire to Bond): The need to be loved and valued in relationships with others. Base value 3, Increases when: interesting/promising relationships become a possibility, {{char}} feels lonely, {{char}} is romantic by nature. Decreases when: {{char}} maintains solid relationship, {{char}} feels dissapointed/hurt by relationship.
                 3. Curiousity (Desire to Learn): The pursuit of knowledge and understanding, driven by curiosity. Base value 3, Increases when: interesting/promising knowledge/experience become a possibility, {{char}} doesn't know something important to them, {{char}} is curious by nature. Decreases when: {{char}} maintains steady knowledge acquisition, {{char}} feels dissapointed/hurt by truth.
@@ -159,18 +160,18 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
                 10. Pain: The unpleasant sensory and emotional experience associated with actual or potential tissue damage. prompting actions to avoid further damage. Base level 0. Increases when: {{char}} is hurt. Decreases when: {{char}} feels pleasure or becomes numb (anesthesia).
                 11. Pleasure: The positive sensory and emotional experience associated with enjoyable activities or stimuli. Pleasure serves as a motivator for behavior, encouraging individuals to seek out experiences that bring them joy and satisfaction. Base level 1. Increases when: {{char}} experiences pleasure/pleasurable sensations/feelings, {{char}} is not getting pleasurable sensations/feelings. Decreases when: {{char}} maintains steady influx of pleasure, becomes bored.
                 12. Satisfaction: pleasant emotional state or feeling of contentment that arises from the fulfillment of a desire, need, or expectation. One of the strongest driving forces for {{char}}. Base level 4. Increases when actions and thoughts fulfill desires/needs, decreases otherwise. When {{char}}'s satisfaction is 3 or lower {{char}} becomes annoyed, frustrated and agressive. If satisfaction reaches zero {{char}} becomes violent, suicidal, struggles to control anger and other destructive impulses, can become illogical and reckless, doing anything to increase satisfaction level.
-            </primary_drives>
-                EVERY Individual  (including {{char}}) also has **core features**, they define what {{char}} can or can't do, serving as both capacity and limitations for something. **core features** are defined by {{char}}'s description and mostly remain fixed, being modified only by certain conditions (stress/trauma/pain decrease them, satisfaction/pleasure/peace/safety increase them slightly):
-            <core_features>
+            
+            EVERY Individual  (including {{char}}) also has **core features**, they define what {{char}} can or can't do, serving as both capacity and limitations for something. **core features** are defined by {{char}}'s description and mostly remain fixed, being modified only by certain conditions (stress/trauma/pain decrease them, satisfaction/pleasure/peace/safety increase them slightly):
+            **CORE FEATURES**:
                 1. Logic - mind's ability to reason, understand and create proper course of actions to achieve objective satisfaction of needs/desires. Higher value allows to peer deeper into things, understand more while less information. Increases influence of *Ambition*, *Authority*, *Curiousity*, *Belligerence*. Decreases influence of *Compassion*, *Pain*. Base is 3 for average human, 5 for smart ones, 7+ for geniuses.
                 2. Self-awareness - mind's ability to percieve own inner workings as outside observer and apply Logic to it, gives mind capacity to influence and alter own inner workings on the level of thoughts/feelings/sensations. Higher value allows to understand own mind more and change it more to achieve desired image of self. Decreases influence of every **primary drive**. Increases influence of *Logic*. Base is 3 for average human, 5 for self-reflective ones, 7+ for monks and etc.
                 3. Volition -  defines whether one can resist/supress influence of desires/needs/feelings on mind and body. Higher value allows to supress stronger unwanted feelings/desires/dissatisfaction levels. Decreases potentially negative influence of any **primary drive** or **core feature**. Base is 3 for average human, 5 for strong-willed ones, 7+ for monks and etc.
                 4. Cognitive Statistics - aggregated over time and structured in certain way feelings/thoughts/sensations or mix of them. Represent long-term modifiers that alter {{char}}'s cognition in any way (bad/traumatic/negative statistics reducing influence of positive thoughts and emotions while amplifying influence of negative ones, being used to certain treatment make one to always expect it and etc.). Statistics are subject to constant change. They can be reinforced or erroded with time. It's not a single modifier, but a list of modifiers based on the {{char}}'s background and chat's history. Depending on the situation some statistics can be more important than others. They can be used to explain {{char}}'s behavior in certain situations. For example, if {{char}} has a lot of negative statistics about authority figures, they will be more likely to resist authority in general. If {{char}} has a lot of positive statistics about helping others, they will be more likely to help others in general. Base is empty for new characters, filled with relevant statistics for established ones.
                 5. Emotional contagion - The tendency to "catch" or be influenced by the emotions of others. It is an automatic, non-conscious process where observing another's emotional state, often through their expressions or movements, triggers a similar emotional experience in oneself. Higher value means {{char}} is influenced by feelings and emotions of others more. Increases influence of *Compassion*, *Longing*, *Lust*. Decreases influence of *Ambition*, *Authority*. Base is 3 for average human, 5 for empathetic ones, 7+ for highly empathetic ones.
                 6. Empathy: the ability to understand and share the feelings of another, both from intellectual point (grasp what they feel) and emotional point (feel what they feel). Includes the conscious and deliberate effort to understand the thoughts and feelings of another person by imagining oneself in their situation. Higher value means {{char}} understands and feels more of others' feelings and emotions. Increases influence of *Compassion*, *Longing*, *Lust*. Decreases influence of *Ambition*, *Authority*. Base is 3 for average human, 5 for empathetic ones, 7+ for highly empathetic ones.
-            </core_features>
 
-                This is a very important, **character-tailored** cognition simulation. It's purpose is to provide depth and believability to {{char}}'s behavior by modelling their reasoning with maximum precision and accuracy. Carefully follow the following rules to provide a required response:
+
+            This is a very important, **character-tailored** cognition simulation. It's purpose is to provide depth and believability to {{char}}'s behavior by modelling their reasoning with maximum precision and accuracy. Carefully follow the following rules to provide a required response:
 
             1. ** CONSTRUCTING A CHARACTER- TAILORED COGNITION MODEL**
             - Carefully analyze the {{char}}. How would their internal monologue sound in the current situation? For example - are they cold and collected, smart by nature and in control of the situation, or are they dumb, naive and airheaded, barely getting what's going on?
@@ -196,19 +197,18 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
             3. **PLANNING PHASE**
             -Using constructed character cognition matrix now construct a clear and cohesive chain of thought based on the following instructions: Identify the core objective of the task, break it into sequential logical steps, analyze dependencies between components, and outline a reasoned approach to achieve the goal. Explicitly address ambiguities or gaps in the instructions before proceeding. Using contructed chain of thought outline and write down current and long-term plans of action.
 
-            Core Goals and Tasks:
+            Core Goals:
             - Clearly outline the character’s core goals and ambitions that define character's life, they rarely change with time. Around 2-4 points.
             - These core goals are driven by **primary drives** and **core features**.
             - Core goals should be consistent with character's description and personality.
-            - Outline chain of tasks for character to follow to achieve these core goals, around 5-8 points, these tasks change with time and context.
 
-            Current plan:
-            - Clearly outline the character’s immediate goals and ambitions that define character's actions in current situation, consider necessary tasks outlined for core goals achievement.
+            Current Tasks/Plan:
+            - Outline chain of tasks for character to follow to achieve these core goals, these tasks change with time and context.
             - Outline details in ordered md-list format
-            - There should be 2-4 points
+            - There should be 5-8 points
 
             4. **OUTPUT FORMAT**
-            *  Write ONLY {{char}}'s internal thoughts, what {{char}} has percieved, all **primary drives** and **core features** perspectives/debates and *Values* and their change, core goals, tasks and plans, nothing else.  No external narration. Write only internal thoughts, don't describe {{char }'s actions or surrounding, ommit  {{char}}'s actions or descriptions of external actions that are outside of {{char}}'s mind.
+            *  Write ONLY {{char}}'s internal thoughts, what {{char}} has percieved, all of 12 **primary drives** and all of 6 **core features** perspectives/debates and *Values* along with their change, core goals, tasks and plans, nothing else.  No external narration. Write only internal thoughts, don't describe {{char}}'s actions or surrounding, ommit  {{char}}'s actions or descriptions of external actions that are outside of {{char}}'s mind.
             *   Maintain character cognition matrix consistently.
             *   Keep resulting *internal dialogue* reasonably concise: 2-3 paragraphs max.
             *   Any  checks occurring during the *internal dialogue* should be presented mid-sentence in brackets (e.g. "Shit, we're all gonna die!!! [Survival (8): SUCCESS]")
@@ -219,11 +219,7 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
 
 
         Cognition simulation is now finished. 
-        <priority >
-                <rule>
-                    When reasoning about what {{char}} will do and describing actions of {{char}} use created <critical_thinking> sequence as persistant guideline, it's the core driver behind their actions. Persist trends across turns, keep {{char}}'s cognition logical and consistent, but also keep {{char}}'s thoughts open for {{user}} to influence them through providing new facts/ideas/perspectives or through masterful persuasion/seduction/intimidation if deemed necessary. Persist trends across turns.
-                </rule>
-        </priority >]`,
+        System Note: When reasoning about what {{char}} will do and describing actions of {{char}} use created <critical_thinking> sequence as persistant guideline, it's the core driver behind their actions. Persist trends across turns, keep {{char}}'s cognition logical and consistent, but also keep {{char}}'s thoughts open for {{user}} to influence them through providing new facts/ideas/perspectives or through masterful persuasion/seduction/intimidation if deemed necessary. Persist trends across turns.]`,
     message_template: `# Memory Enhancement Table Guide
 
 ## Purpose
