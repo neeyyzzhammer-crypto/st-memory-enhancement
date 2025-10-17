@@ -648,7 +648,46 @@ function InitBinging() {
     });
 
 }
+function ensureRagFieldsRow() {
+    // No-op if already present (when using static template this will exist)
+    if ($('#enable_rag').length && $('#rag_similarity').length) return;
 
+    // Fallback injection if needed (kept defensive)
+    const $anchor = $('#dataTable_short_term_memory').closest('div').parent();
+    if (!$anchor.length) return;
+
+    const $row = $(`
+        <div class="rag-row" style="display:flex; align-items:center; gap:8px; margin-top:6px; width:100%; flex-basis:100%;">
+            <label class="checkbox_label range-block justifyLeft" style="display:flex; align-items:center; gap:6px; margin:0;">
+                <input type="checkbox" id="enable_rag"><span>Enable Rag</span>
+            </label>
+            <label for="rag_similarity" style="white-space:nowrap; margin-left:10px;">rag_similarity</label>
+            <input id="rag_similarity" type="range" min="0" max="1" step="0.01" style="width:180px;">
+            <code id="rag_similarity_value" style="min-width:40px; text-align:center;">0.25</code>
+        </div>
+    `);
+    $anchor.after($row);
+}
+
+function bindRagEvents() {
+    $('#enable_rag').off('change.rag').on('change.rag', function () {
+        USER.tableBaseSetting.enable_rag = this.checked;
+        USER.saveSettings && USER.saveSettings();
+        if (this.checked) {
+            try { window.ST_RAG?.vectorizeAllIfNeeded(); } catch { }
+            EDITOR.success('RAG enabled');
+        } else {
+            EDITOR.success('RAG disabled');
+        }
+    });
+
+    $('#rag_similarity').off('input.rag change.rag').on('input.rag change.rag', function () {
+        const v = Math.max(0, Math.min(1, parseFloat(this.value)));
+        USER.tableBaseSetting.rag_similarity = isNaN(v) ? 0.25 : v;
+        $('#rag_similarity_value').text(USER.tableBaseSetting.rag_similarity.toFixed(2));
+        USER.saveSettings && USER.saveSettings();
+    });
+}
 /**
  * 渲染设置
  */
@@ -662,6 +701,13 @@ export function renderSetting() {
     $('#dataTable_deep').val(USER.tableBaseSetting.deep);
     ensureShortTermMemoryField();
     ensureCriticalThinkingMemoryField();
+    ensureRagFieldsRow();
+
+    // Initialize values
+    updateSwitch('#enable_rag', USER.tableBaseSetting.enable_rag === true);
+    $('#rag_similarity').val(USER.tableBaseSetting.rag_similarity ?? 0.25);
+    $('#rag_similarity_value').text((USER.tableBaseSetting.rag_similarity ?? 0.25).toFixed(2));
+
     $('#dataTable_short_term_memory').val(USER.tableBaseSetting.short_term_memory ?? 2);
     $('#dataTable_critical_thinking_memory').val(USER.tableBaseSetting.critical_thinking_memory ?? 1);
 

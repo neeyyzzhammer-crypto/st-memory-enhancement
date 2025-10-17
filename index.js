@@ -18,6 +18,8 @@ import { Cell } from "./core/table/cell.js";
 // Import helper to hide/unhide chat messages
 import { hideChatMessageRange } from '../../../chats.js'; // adjust path if root differs
 
+import './scripts/runtime/rag.js'; // ensure RAG runtime (listeners + window.ST_RAG) is loaded
+
 console.log("______________________记忆插件：开始加载______________________")
 
 const VERSION = '3.2.0'
@@ -26,7 +28,86 @@ const editErrorInfo = {
     forgotCommentTag: false,
     functionNameError: false,
 };
+// Helper: strip blocks we must not include in RAG text injection
+function __stripCriticalAndInfoBlocks(text) {
+    if (typeof text !== 'string' || !text) return '';
+    return text
+        .replace(/<critical_thinking>[\s\S]*?<\/critical_thinking>/gi, '')
+        .replace(/<infoblock>[\s\S]*?<\/infoblock>/gi, '');
+}
 
+// Build RAG "past events" text for current user message
+async function __buildPastEventsFromRag(eventData) {
+    try {
+        if (!USER.tableBaseSetting?.enable_rag || !window.ST_RAG?.searchSimilarByText) return '';
+
+        // Find latest user message used to build this prompt
+        let lastUserIdx = -1;
+        for (let i = eventData.chat.length - 1; i >= 0; i--) {
+            if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
+        }
+        if (lastUserIdx === -1) return '';
+
+        const userText = eventData.chat[lastUserIdx]?.content || '';
+        const threshold = typeof USER.tableBaseSetting?.rag_similarity === 'number'
+            ? USER.tableBaseSetting.rag_similarity
+            : 0.25;
+
+        const results = await window.ST_RAG.searchSimilarByText(userText, threshold);
+        if (!Array.isArray(results) || results.length === 0) return '';
+
+        // Concatenate only stripped text (no headers, no labels)
+        const joined = results
+            .map(r => __stripCriticalAndInfoBlocks(r?.text || '').trim())
+            .filter(Boolean)
+            .join('\n\n');
+
+        return joined || '';
+    } catch (e) {
+        console.warn('[RAG] Failed to build past events block:', e);
+        return '';
+    }
+}
+
+/* === PATCH: initTableData with RAG past_events injection === */
+async function initTableDataWithRag(eventData) {
+    const template = USER.tableBaseSetting.message_template || '';
+
+    // Prefer reference piece, fallback to last with sheets
+    const piece =
+        (BASE.getReferencePiece && BASE.getReferencePiece()) ||
+        (function () {
+            const chat = USER.getContext()?.chat || [];
+            for (let i = chat.length - 1; i >= 0; i--) {
+                if (chat[i]?.hash_sheets) return chat[i];
+            }
+            return null;
+        })();
+
+    let tableData = '';
+    if (piece) {
+        tableData = _migrateAndExportFullMemoryTable(piece);
+        if (!tableData) {
+            tableData = getTablePromptByPiece(piece, false);
+        }
+    }
+
+    // NEW: compute past_events via RAG
+    let pastEvents = '';
+    if (template.includes('{{past_events}}')) {
+        pastEvents = await __buildPastEventsFromRag(eventData);
+    }
+
+    let replaced = template.replace(/{{tableData}}/g, tableData);
+    replaced = replaced.replace(/{{past_events}}/g, pastEvents);
+
+    if (!template.includes('{{tableData}}')) {
+        console.warn('[Memory Enhancement] message_template missing {{tableData}}.');
+    } else if (!tableData) {
+        console.warn('[Memory Enhancement] Memory Table export empty (no rows or no table).');
+    }
+    return replaceUserTag(replaced);
+}
 /**
  * 修复值中不正确的转义单引号
  */
@@ -622,9 +703,6 @@ function __buildThinkingPromptOverride(latestSection) {
     }
 }
 
-// REPLACE the existing onChatCompletionPromptReady with the original (restored) behavior
-
-// PATCH: modify prompt assembly to honor short_term_memory = 0 (only current user message) and CRM logic
 async function onChatCompletionPromptReady(eventData) {
     try {
         // Step-by-step: keep original early return logic
@@ -633,6 +711,7 @@ async function onChatCompletionPromptReady(eventData) {
                 USER.tableBaseSetting.isAiReadTable === true &&
                 USER.tableBaseSetting.injection_mode !== "injection_off") {
 
+                // In step-by-step mode we keep previous behavior (no past_events injection here by design)
                 const tableData = getTablePrompt(eventData, true);
                 if (tableData) {
                     const finalPrompt =
@@ -663,7 +742,6 @@ async function onChatCompletionPromptReady(eventData) {
         ) || 0;
 
         if (stm === 0) {
-            // Find last user message in the (pre-built) chat array
             let lastUserIdx = -1;
             for (let i = eventData.chat.length - 1; i >= 0; i--) {
                 const m = eventData.chat[i];
@@ -673,16 +751,16 @@ async function onChatCompletionPromptReady(eventData) {
                 }
             }
             if (lastUserIdx !== -1) {
-                eventData.chat = [eventData.chat[lastUserIdx]]; // retain only current user prompt
+                eventData.chat = [eventData.chat[lastUserIdx]];
             } else {
-                // Fallback: if no explicit user role found, keep only final message
                 eventData.chat = eventData.chat.length ? [eventData.chat[eventData.chat.length - 1]] : [];
             }
         }
 
-        // Build injections AFTER possible trimming (but CRM uses full context internally)
-        const thinkingContent = initThinkingData(eventData); // uses CRM count
-        const promptContent = initTableData(eventData);
+        // Build injections AFTER trimming
+        const thinkingContent = initThinkingData(eventData);
+        // NEW: build message template content with {{past_events}} injected via RAG
+        const promptContent = await initTableDataWithRag(eventData);
         const role = getMesRole();
         const inserts = [];
 
@@ -705,7 +783,7 @@ async function onChatCompletionPromptReady(eventData) {
     } catch (error) {
         EDITOR.error(`记忆插件：表格数据注入失败\n原因：`, error.message, error);
     }
-    console.log("注入表格总体提示词 + 思考提示词 (with STM=0 & CRM support)", eventData.chat);
+    console.log("注入表格总体提示词 + 思考提示词 (with STM=0 & CRM support + RAG past_events)", eventData.chat);
 }
 /**
  * 宏获取提示词

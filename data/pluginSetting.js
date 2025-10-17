@@ -121,7 +121,8 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
     // NEW: Short-term memory message window (number of recent messages kept in prompt)
     short_term_memory: 2,
     critical_thinking_memory: 1,          // NEW: how many past <critical_thinking> sections to include separately
-
+    enable_rag: false,
+    rag_similarity: 0.25,
     /**
      * ===========================
      * 注入设置
@@ -220,7 +221,12 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
 
         Cognition simulation is now finished. 
         System Note: When reasoning about what {{char}} will do and describing actions of {{char}} use created <critical_thinking> sequence as persistant guideline, it's the core driver behind their actions. Persist trends across turns, keep {{char}}'s cognition logical and consistent, but also keep {{char}}'s thoughts open for {{user}} to influence them through providing new facts/ideas/perspectives or through masterful persuasion/seduction/intimidation if deemed necessary. Persist trends across turns.]`,
-    message_template: `# Memory Enhancement Table Guide
+    message_template: `
+
+    ## Past events detailed memory:
+    {{past_events}}
+
+    # Memory Enhancement Table Guide
 
 ## Purpose
 - The memory table is a CSV format table that stores contextual data and states (locations, participants, keywords, narrative content, and cognitive impact).
