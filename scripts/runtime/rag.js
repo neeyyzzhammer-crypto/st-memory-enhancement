@@ -15,13 +15,21 @@ import { APP, USER, SYSTEM, EDITOR } from '../../core/manager.js';
 const RAG_STORE_KEY = 'rag_store_v1';
 const DEFAULT_EMBED_MODEL = 'embeddinggemma';
 const MAX_LEN_CHARS = 2000; // base message trimming
-const TOP_K = 12;
+const TOP_K = 3;
 
 // Attachment chunking
-const CHUNK_SIZE = 2000;
 const CHUNK_OVERLAP_RATIO = 0.15;
-const CHUNK_OVERLAP = Math.floor(CHUNK_SIZE * CHUNK_OVERLAP_RATIO); // 300
-const CHUNK_STRIDE = Math.max(1, CHUNK_SIZE - CHUNK_OVERLAP);       // 1700
+
+// Keep attachments at large chunks
+const ATTACH_CHUNK_SIZE = 2000;
+
+// New: message chunking defaults (200 chars windows with 15% overlap)
+const MSG_CHUNK_SIZE = 200;
+
+function getStride(size, overlapRatio) {
+    const overlap = Math.floor(size * overlapRatio);
+    return Math.max(1, size - overlap);
+}
 
 function ragEnabled() {
     return USER.tableBaseSetting?.enable_rag === true;
@@ -37,6 +45,7 @@ function getStore() {
     };
     return ctx.chatMetadata[RAG_STORE_KEY];
 }
+
 // Strip sections that must not be embedded from chat messages
 function stripPrivateBlocks(text) {
     if (typeof text !== 'string' || !text) return '';
@@ -85,8 +94,6 @@ function cosineSim(a, b) {
 
 // Try to determine Ollama base URL
 function guessOllamaBase() {
-    // Allow future integration from runtime settings here if needed
-    // Fallback to local ollama
     return 'http://ollama:11434';
 }
 
@@ -121,12 +128,10 @@ function hasHashAlready(store, hash) {
 /* ===================== Attachments support ===================== */
 
 function getMsgAttachments(msg) {
-    // Common places where ST keeps attachments; try multiple fields defensively.
     const atts = [];
     if (Array.isArray(msg?.attachments)) atts.push(...msg.attachments);
     if (Array.isArray(msg?.files)) atts.push(...msg.files);
     if (Array.isArray(msg?.extra?.attachments)) atts.push(...msg.extra.attachments);
-    // Filter out images since OCR is out of scope here
     return atts.filter(a => !/^image\//i.test(a?.mime || a?.type || ''));
 }
 
@@ -140,7 +145,6 @@ function getAttachmentUrl(att) {
     return att?.url || att?.path || att?.href || att?.src || '';
 }
 function getAttachmentTextField(att) {
-    // Some integrations may pre-extract or include .text
     return typeof att?.text === 'string' ? att.text : null;
 }
 
@@ -183,7 +187,6 @@ async function fallbackFetchText(att) {
  * Attempt to use SillyTavern vector extension extractor if present, else fallback to simple text/html/csv/md.
  */
 async function extractAttachmentText(att) {
-    // 1) If ST Vectors extension exposes an extractor, use it.
     try {
         const ext =
             window?.SillyTavern?.extensions?.vectors ||
@@ -197,11 +200,9 @@ async function extractAttachmentText(att) {
         console.warn('[RAG] ST Vectors extractor failed; using fallback:', e);
     }
 
-    // 2) Pre-extracted .text
     const pre = getAttachmentTextField(att);
     if (pre && pre.trim()) return pre.trim();
 
-    // 3) Text-like mime => read as text
     const name = getAttachmentName(att);
     const mime = getAttachmentMime(att);
     if (isTextLikeMime(mime) || isMd(name, mime) || isCsv(name, mime) || isProbablyHtml(name, mime)) {
@@ -212,13 +213,13 @@ async function extractAttachmentText(att) {
         }
     }
 
-    // 4) Unsupported complex formats (pdf/docx/epub/etc.) w/o vector ext => skip
     EDITOR.warning(`[RAG] Skipped unsupported attachment without vector extension: ${name}`);
     return null;
 }
 
-function* chunkText(text, size = CHUNK_SIZE, stride = CHUNK_STRIDE) {
+function* chunkText(text, size = ATTACH_CHUNK_SIZE, overlapRatio = CHUNK_OVERLAP_RATIO) {
     const len = text.length;
+    const stride = getStride(size, overlapRatio);
     let start = 0;
     while (start < len) {
         yield text.slice(start, Math.min(start + size, len));
@@ -243,7 +244,7 @@ async function vectorizeAttachmentsForMessage(idx) {
             const text = await extractAttachmentText(att);
             if (!text || typeof text !== 'string') continue;
 
-            let chunks = Array.from(chunkText(text));
+            let chunks = Array.from(chunkText(text, ATTACH_CHUNK_SIZE, CHUNK_OVERLAP_RATIO));
             const total = chunks.length;
 
             for (let i = 0; i < total; i++) {
@@ -251,7 +252,7 @@ async function vectorizeAttachmentsForMessage(idx) {
                 if (!chunk) continue;
 
                 const store = getStore();
-                const hash = SYSTEM.calculateStringHash(`${name}|${i}|${chunk}`);
+                const hash = SYSTEM.calculateStringHash(`${name}|att|${i}|${chunk}`);
                 if (hasHashAlready(store, hash)) continue;
 
                 const emb = await getOllamaEmbedding(chunk);
@@ -290,26 +291,37 @@ async function vectorizeMessageByIndex(idx) {
     const msg = chat[idx];
     const text = getMsgText(msg);
     if (text) {
-        const store = getStore();
-        const hash = SYSTEM.calculateStringHash(text);
-        if (!hasHashAlready(store, hash)) {
-            const emb = await getOllamaEmbedding(text);
-            if (emb) {
-                if (!store.dim) store.dim = emb.length;
-                store.items.push({
-                    idx,
-                    is_user: !!msg.is_user,
-                    text,
-                    emb,
-                    ts: Date.now(),
-                    hash,
-                });
-                try { USER.saveChat && USER.saveChat(); } catch { /* ignore */ }
-            }
+        const chunks = Array.from(chunkText(text, MSG_CHUNK_SIZE, CHUNK_OVERLAP_RATIO));
+        const total = chunks.length;
+
+        for (let i = 0; i < total; i++) {
+            const chunk = chunks[i].trim();
+            if (!chunk) continue;
+
+            const store = getStore();
+            const hash = SYSTEM.calculateStringHash(`${idx}|msg|${i}|${chunk}`);
+            if (hasHashAlready(store, hash)) continue;
+
+            const emb = await getOllamaEmbedding(chunk);
+            if (!emb) continue;
+            if (!store.dim) store.dim = emb.length;
+
+            store.items.push({
+                idx,
+                is_user: !!msg.is_user,
+                text: chunk,
+                emb,
+                ts: Date.now(),
+                hash,
+                type: 'message',
+                chunkIndex: i,
+                chunkTotal: total,
+            });
         }
+
+        try { USER.saveChat && USER.saveChat(); } catch { /* ignore */ }
     }
 
-    // NEW: also vectorize attachments for this message
     await vectorizeAttachmentsForMessage(idx);
 }
 
@@ -338,106 +350,82 @@ function searchSimilarByEmbedding(queryEmb, threshold, topK = TOP_K) {
     return filtered;
 }
 
-async function searchSimilarByText(text, threshold) {
+// Bag expansion search (unique results across the bag)
+async function bagSearchByText(text, threshold, topK, depth) {
     let cleaned = (text || '').trim();
     cleaned = stripPrivateBlocks(cleaned);
     if (!cleaned) return [];
     const emb = await getOllamaEmbedding(cleaned);
     if (!emb) return [];
-    return searchSimilarByEmbedding(emb, threshold);
-}
 
+    const k = Number.isFinite(topK) ? Math.max(1, topK) : (USER.tableBaseSetting?.rag_top_k ?? TOP_K);
+    const d = Number.isFinite(depth) ? Math.max(1, depth) : (USER.tableBaseSetting?.rag_depth ?? 1);
+    const thr = typeof threshold === 'number' ? threshold : (USER.tableBaseSetting?.rag_similarity ?? 0.25);
 
-function formatRagContext(matches) {
-    if (!matches || matches.length === 0) return '';
-    const lines = matches.map(m => {
-        if (m.type === 'attachment') {
-            const label = m.attName ? `${m.attName}` : 'attachment';
-            const pos = (typeof m.chunkIndex === 'number' && typeof m.chunkTotal === 'number')
-                ? `#${m.chunkIndex + 1}/${m.chunkTotal}` : '';
-            const who = m.is_user ? 'User' : 'Assistant';
-            return `- [${who}] [Attachment:${label}${pos ? ' ' + pos : ''}] ${m.text}`;
-        } else {
-            const who = m.is_user ? 'User' : 'Assistant';
-            return `- [${who}] ${m.text}`;
+    const bag = new Map();
+    const addUnique = (items) => {
+        for (const it of items || []) {
+            if (!bag.has(it.hash)) bag.set(it.hash, it);
         }
-    });
-    return `Retrieved context (RAG):\n${lines.join('\n')}`;
-}
+    };
 
-// Event handlers
+    let frontier = searchSimilarByEmbedding(emb, thr, k);
+    addUnique(frontier);
 
-async function handleChatChanged() {
-    if (!ragEnabled()) return;
-    // Opportunistically backfill vectors for any missing messages
-    try {
-        await vectorizeAllIfEmpty();
-    } catch (e) {
-        console.warn('[RAG] Backfill failed on CHAT_CHANGED:', e);
-    }
-}
-
-async function handleAssistantRendered(chat_id) {
-    if (!ragEnabled()) return;
-    try {
-        await vectorizeMessageByIndex(chat_id);
-    } catch (e) {
-        console.warn('[RAG] Vectorize assistant message failed:', e);
-    }
-}
-
-async function handlePromptReady(eventData) {
-    if (!ragEnabled()) return;
-
-    try {
-        // Ensure store exists; opportunistically backfill if entirely empty
-        await vectorizeAllIfEmpty();
-
-        // Also try to vectorize the last message in the underlying chat (if not yet done)
-        const chatArr = USER.getContext()?.chat || [];
-        const lastIdx = chatArr.length - 1;
-        if (lastIdx >= 0) await vectorizeMessageByIndex(lastIdx);
-
-        // Find last user message in eventData.chat to build query
-        let lastUserIdx = -1;
-        for (let i = eventData.chat.length - 1; i >= 0; i--) {
-            if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
+    for (let iter = 0; iter < d; iter++) {
+        if (!frontier.length) break;
+        const nextFrontier = [];
+        for (const node of frontier) {
+            const neigh = searchSimilarByEmbedding(node.emb, thr, k);
+            for (const n of neigh) {
+                if (!bag.has(n.hash)) {
+                    bag.set(n.hash, n);
+                    nextFrontier.push(n);
+                }
+            }
         }
-        if (lastUserIdx === -1) return;
-
-        const userText = eventData.chat[lastUserIdx]?.content || '';
-        const threshold = typeof USER.tableBaseSetting?.rag_similarity === 'number'
-            ? USER.tableBaseSetting.rag_similarity
-            : 0.25;
-
-        const matches = await searchSimilarByText(userText, threshold);
-        if (!matches || matches.length === 0) return;
-
-        const ragText = formatRagContext(matches);
-        if (!ragText) return;
-
-        const role = getInjectionRole();
-        const insertMsg = { role, content: ragText };
-
-        const deep = Number(USER.tableBaseSetting?.deep || 0);
-        if (deep === 0) {
-            eventData.chat.push(insertMsg);
-        } else {
-            eventData.chat.splice(-deep, 0, insertMsg);
-        }
-    } catch (e) {
-        console.warn('[RAG] Retrieval injection failed:', e);
+        frontier = nextFrontier;
     }
+
+    const allItems = Array.from(bag.values()).map(it => ({
+        ...it,
+        score: cosineSim(emb, it.emb),
+    }));
+    allItems.sort((a, b) => b.score - a.score);
+    return allItems;
 }
 
-// Register event listeners
-APP?.eventSource?.on?.(APP.event_types.CHAT_CHANGED, handleChatChanged);
-APP?.eventSource?.on?.(APP.event_types.CHARACTER_MESSAGE_RENDERED, handleAssistantRendered);
-APP?.eventSource?.on?.(APP.event_types.CHAT_COMPLETION_PROMPT_READY, handlePromptReady);
+// Backward-compatible entry point
+async function searchSimilarByText(text, threshold) {
+    return bagSearchByText(text, threshold);
+}
 
-// Public API for settings toggle to trigger initial pass
+/* ============ Maintenance helpers (per-chat store) ============ */
+
+function purgeMessageEmbeddings(idx) {
+    const store = getStore();
+    const before = store.items.length;
+    store.items = store.items.filter(it => it.idx !== idx);
+    try { USER.saveChat && USER.saveChat(); } catch {}
+    return before - store.items.length;
+}
+
+function adjustIndicesAfterDeletion(deletedIdx) {
+    const store = getStore();
+    for (const it of store.items) {
+        if (it.idx > deletedIdx) it.idx -= 1;
+    }
+    try { USER.saveChat && USER.saveChat(); } catch {}
+}
+
+/* ============ Public API ============ */
+
+// Important: no event listeners here; index.js drives RAG.
 window.ST_RAG = {
     vectorizeAllIfNeeded: vectorizeAllIfEmpty,
     vectorizeMessageByIndex,
+    purgeMessageEmbeddings,
+    adjustIndicesAfterDeletion,
     searchSimilarByText,
+    bagSearchByText,
 };

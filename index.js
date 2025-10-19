@@ -732,7 +732,18 @@ async function onChatCompletionPromptReady(eventData) {
             USER.tableBaseSetting.injection_mode === "injection_off") {
             return;
         }
-
+        // Ensure RAG vectors exist for the latest user message (source chat text)
+        try {
+            if (USER.tableBaseSetting.enable_rag && window.ST_RAG?.vectorizeMessageByIndex) {
+                const chatArr = USER.getContext()?.chat || [];
+                const lastIdx = chatArr.length - 1;
+                if (lastIdx >= 0) {
+                    await window.ST_RAG.vectorizeMessageByIndex(lastIdx);
+                }
+            }
+        } catch (e) {
+            console.warn('[RAG] vectorize on prompt-ready failed:', e);
+        }
         // SHORT TERM MEMORY = 0 => only keep the latest user message before injection
         const stm = parseInt(
             USER.tableBaseSetting?.short_term_memory ??
@@ -881,10 +892,17 @@ function initThinkingData(eventData) {
     }
 }
 
-/**
- * 消息编辑事件
- */
 async function onMessageEdited(this_edit_mes_id) {
+    // Keep the RAG store in sync for both user and assistant edits
+    try {
+        if (USER.tableBaseSetting.enable_rag && window.ST_RAG) {
+            window.ST_RAG.purgeMessageEmbeddings(this_edit_mes_id);
+            await window.ST_RAG.vectorizeMessageByIndex(this_edit_mes_id);
+        }
+    } catch (e) {
+        console.warn('[RAG] sync on MESSAGE_EDITED failed:', e);
+    }
+
     if (USER.tableBaseSetting.isExtensionAble === false || USER.tableBaseSetting.step_by_step === true) return;
     const chat = USER.getContext().chat[this_edit_mes_id];
     if (chat.is_user === true || USER.tableBaseSetting.isAiWriteTable === false) return;
@@ -896,11 +914,18 @@ async function onMessageEdited(this_edit_mes_id) {
     updateSheetsView();
 }
 
-/**
- * 消息接收时触发
- */
+
 async function onMessageReceived(chat_id) {
     if (USER.tableBaseSetting.isExtensionAble === false) return;
+    // RAG: vectorize this assistant message (source text from USER.getContext().chat[chat_id])
+    try {
+        if (USER.tableBaseSetting.enable_rag && window.ST_RAG?.vectorizeMessageByIndex) {
+            await window.ST_RAG.vectorizeMessageByIndex(chat_id);
+        }
+    } catch (e) {
+        console.warn('[RAG] vectorize on assistant message failed:', e);
+    }
+
     if (USER.tableBaseSetting.step_by_step === true && USER.getContext().chat.length > 2) {
         TableTwoStepSummary("auto");
     } else {
@@ -946,12 +971,31 @@ async function onChatChanged() {
                 mes.dataset.macroProcessed = true;
             }
         });
+
+        // RAG: opportunistically vectorize newest message (covers user-only additions)
+        if (USER.tableBaseSetting.enable_rag && window.ST_RAG?.vectorizeMessageByIndex) {
+            const chat = USER.getContext()?.chat || [];
+            const lastIdx = chat.length - 1;
+            if (lastIdx >= 0) {
+                await window.ST_RAG.vectorizeMessageByIndex(lastIdx);
+            }
+        }
     } catch (error) {
         EDITOR.error("记忆插件：处理聊天变更失败\n原因：", error.message, error);
     }
 }
 
 async function onMessageSwiped(chat_id) {
+    // RAG: purge and revectorize for the swiped assistant message
+    try {
+        if (USER.tableBaseSetting.enable_rag && window.ST_RAG) {
+            window.ST_RAG.purgeMessageEmbeddings(chat_id);
+            await window.ST_RAG.vectorizeMessageByIndex(chat_id);
+        }
+    } catch (e) {
+        console.warn('[RAG] sync on MESSAGE_SWIPED failed:', e);
+    }
+
     if (USER.tableBaseSetting.isExtensionAble === false || USER.tableBaseSetting.isAiWriteTable === false) return;
     const chat = USER.getContext().chat[chat_id];
     if (!chat.swipe_info[chat.swipe_id]) return;
@@ -960,7 +1004,26 @@ async function onMessageSwiped(chat_id) {
     } catch (error) {
         EDITOR.error("记忆插件：swipe切换失败\n原因：", error.message, error);
     }
+
     updateSheetsView();
+}
+
+/**
+ * 删除消息事件
+ */
+async function onMessageDeleted(chat_id) {
+    // RAG: purge embeddings for deleted message and shift indices after it
+    try {
+        if (USER.tableBaseSetting.enable_rag && window.ST_RAG) {
+            window.ST_RAG.purgeMessageEmbeddings(chat_id);
+            window.ST_RAG.adjustIndicesAfterDeletion(chat_id);
+        }
+    } catch (e) {
+        console.warn('[RAG] sync on MESSAGE_DELETED failed:', e);
+    }
+
+    // Keep previous behavior
+    await onChatChanged();
 }
 
 /**
@@ -1095,7 +1158,8 @@ jQuery(async () => {
     APP.eventSource.on(APP.event_types.CHAT_CHANGED, onChatChanged);
     APP.eventSource.on(APP.event_types.MESSAGE_EDITED, onMessageEdited);
     APP.eventSource.on(APP.event_types.MESSAGE_SWIPED, onMessageSwiped);
-    APP.eventSource.on(APP.event_types.MESSAGE_DELETED, onChatChanged);
+    // Replace generic handler with a specialized one for deletions
+    APP.eventSource.on(APP.event_types.MESSAGE_DELETED, onMessageDeleted);
 
     console.log("______________________记忆插件：加载完成______________________")
 });

@@ -569,7 +569,18 @@ async function onChatCompletionPromptReady(eventData) {
         }
 
         console.log("生成提示词前", USER.getContext().chat)
-
+        // Ensure RAG vectors exist for the latest user message (source chat text)
+        try {
+            if (USER.tableBaseSetting.enable_rag && window.ST_RAG?.vectorizeMessageByIndex) {
+                const chatArr = USER.getContext()?.chat || [];
+                const lastIdx = chatArr.length - 1;
+                if (lastIdx >= 0) {
+                    await window.ST_RAG.vectorizeMessageByIndex(lastIdx);
+                }
+            }
+        } catch (e) {
+            console.warn('[RAG] vectorize on prompt-ready failed:', e);
+        }
         // Build both prompts
         const thinkingContent = initThinkingData(eventData); // thinking_template with <previous_thinking> replaced
         const promptContent = initTableData(eventData);      // message_template with {{tableData}} replaced
@@ -707,15 +718,25 @@ function initThinkingData(eventData) {
  * @param this_edit_mes_id 此消息的ID
  */
 async function onMessageEdited(this_edit_mes_id) {
-    if (USER.tableBaseSetting.isExtensionAble === false || USER.tableBaseSetting.step_by_step === true) return
-    const chat = USER.getContext().chat[this_edit_mes_id]
-    if (chat.is_user === true || USER.tableBaseSetting.isAiWriteTable === false) return
+    // Keep the RAG store in sync for both user and assistant edits
     try {
-        handleEditStrInMessage(chat, parseInt(this_edit_mes_id))
-    } catch (error) {
-        EDITOR.error("记忆插件：表格编辑失败\n原因：", error.message, error)
+        if (USER.tableBaseSetting.enable_rag && window.ST_RAG) {
+            window.ST_RAG.purgeMessageEmbeddings(this_edit_mes_id);
+            await window.ST_RAG.vectorizeMessageByIndex(this_edit_mes_id);
+        }
+    } catch (e) {
+        console.warn('[RAG] sync on MESSAGE_EDITED failed:', e);
     }
-    updateSheetsView()
+
+    if (USER.tableBaseSetting.isExtensionAble === false || USER.tableBaseSetting.step_by_step === true) return;
+    const chat = USER.getContext().chat[this_edit_mes_id];
+    if (chat.is_user === true || USER.tableBaseSetting.isAiWriteTable === false) return;
+    try {
+        handleEditStrInMessage(chat, parseInt(this_edit_mes_id));
+    } catch (error) {
+        EDITOR.error("记忆插件：表格编辑失败\n原因：", error.message, error);
+    }
+    updateSheetsView();
 }
 
 /**
@@ -723,21 +744,28 @@ async function onMessageEdited(this_edit_mes_id) {
  * @param {number} chat_id 此消息的ID
  */
 async function onMessageReceived(chat_id) {
-    if (USER.tableBaseSetting.isExtensionAble === false) return
-    if (USER.tableBaseSetting.step_by_step === true && USER.getContext().chat.length > 2) {
-        TableTwoStepSummary("auto");  // 请勿使用await，否则会导致主进程阻塞引起的连锁bug
-    } else {
-        if (USER.tableBaseSetting.isAiWriteTable === false) return
-        const chat = USER.getContext().chat[chat_id];
-        console.log("收到消息", chat_id)
-        try {
-            handleEditStrInMessage(chat)
-        } catch (error) {
-            EDITOR.error("记忆插件：表格自动更改失败\n原因：", error.message, error)
+    if (USER.tableBaseSetting.isExtensionAble === false) return;
+    // RAG: vectorize this assistant message (source text from USER.getContext().chat[chat_id])
+    try {
+        if (USER.tableBaseSetting.enable_rag && window.ST_RAG?.vectorizeMessageByIndex) {
+            await window.ST_RAG.vectorizeMessageByIndex(chat_id);
         }
+    } catch (e) {
+        console.warn('[RAG] vectorize on assistant message failed:', e);
     }
 
-    updateSheetsView()
+    if (USER.tableBaseSetting.step_by_step === true && USER.getContext().chat.length > 2) {
+        TableTwoStepSummary("auto");
+    } else {
+        if (USER.tableBaseSetting.isAiWriteTable === false) return;
+        const chat = USER.getContext().chat[chat_id];
+        try {
+            handleEditStrInMessage(chat);
+        } catch (error) {
+            EDITOR.error("记忆插件：表格自动更改失败\n原因：", error.message, error);
+        }
+    }
+    updateSheetsView();
 }
 
 /**
@@ -774,43 +802,68 @@ function resolveTableMacros(text) {
  */
 async function onChatChanged() {
     try {
-        // 更新表格视图
         updateSheetsView();
-
-        // 在聊天消息中渲染宏
         document.querySelectorAll('.mes_text').forEach(mes => {
             if (mes.dataset.macroProcessed) return;
-
             const originalHtml = mes.innerHTML;
             const newHtml = resolveTableMacros(originalHtml);
-
             if (originalHtml !== newHtml) {
                 mes.innerHTML = newHtml;
                 mes.dataset.macroProcessed = true;
             }
         });
 
+        // RAG: opportunistically vectorize newest message (covers user-only additions)
+        if (USER.tableBaseSetting.enable_rag && window.ST_RAG?.vectorizeMessageByIndex) {
+            const chat = USER.getContext()?.chat || [];
+            const lastIdx = chat.length - 1;
+            if (lastIdx >= 0) {
+                await window.ST_RAG.vectorizeMessageByIndex(lastIdx);
+            }
+        }
     } catch (error) {
-        EDITOR.error("记忆插件：处理聊天变更失败\n原因：", error.message, error)
+        EDITOR.error("记忆插件：处理聊天变更失败\n原因：", error.message, error);
     }
 }
 
+async function onMessageDeleted(chat_id) {
+    // RAG: purge embeddings for deleted message and shift indices after it
+    try {
+        if (USER.tableBaseSetting.enable_rag && window.ST_RAG) {
+            window.ST_RAG.purgeMessageEmbeddings(chat_id);
+            window.ST_RAG.adjustIndicesAfterDeletion(chat_id);
+        }
+    } catch (e) {
+        console.warn('[RAG] sync on MESSAGE_DELETED failed:', e);
+    }
 
+    // Keep previous behavior
+    await onChatChanged();
+}
 /**
  * 滑动切换消息事件
  */
 async function onMessageSwiped(chat_id) {
-    if (USER.tableBaseSetting.isExtensionAble === false || USER.tableBaseSetting.isAiWriteTable === false) return
-    const chat = USER.getContext().chat[chat_id];
-    console.log("滑动切换消息", chat)
-    if (!chat.swipe_info[chat.swipe_id]) return
+    // RAG: purge and revectorize for the swiped assistant message
     try {
-        handleEditStrInMessage(chat)
-    } catch (error) {
-        EDITOR.error("记忆插件：swipe切换失败\n原因：", error.message, error)
+        if (USER.tableBaseSetting.enable_rag && window.ST_RAG) {
+            window.ST_RAG.purgeMessageEmbeddings(chat_id);
+            await window.ST_RAG.vectorizeMessageByIndex(chat_id);
+        }
+    } catch (e) {
+        console.warn('[RAG] sync on MESSAGE_SWIPED failed:', e);
     }
 
-    updateSheetsView()
+    if (USER.tableBaseSetting.isExtensionAble === false || USER.tableBaseSetting.isAiWriteTable === false) return;
+    const chat = USER.getContext().chat[chat_id];
+    if (!chat.swipe_info[chat.swipe_id]) return;
+    try {
+        handleEditStrInMessage(chat);
+    } catch (error) {
+        EDITOR.error("记忆插件：swipe切换失败\n原因：", error.message, error);
+    }
+
+    updateSheetsView();
 }
 
 /**
@@ -979,7 +1032,9 @@ jQuery(async () => {
     APP.eventSource.on(APP.event_types.CHAT_CHANGED, onChatChanged);
     APP.eventSource.on(APP.event_types.MESSAGE_EDITED, onMessageEdited);
     APP.eventSource.on(APP.event_types.MESSAGE_SWIPED, onMessageSwiped);
-    APP.eventSource.on(APP.event_types.MESSAGE_DELETED, onChatChanged);
+    // Replace generic handler with a specialized one for deletions
+    APP.eventSource.on(APP.event_types.MESSAGE_DELETED, onMessageDeleted);
+
 
     
     console.log("______________________记忆插件：加载完成______________________")

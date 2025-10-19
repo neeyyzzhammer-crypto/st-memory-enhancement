@@ -109,6 +109,13 @@
                                     <label for="rag_similarity" style="white-space:nowrap; margin-left:10px;">rag_similarity</label>
                                     <input id="rag_similarity" type="range" min="0" max="1" step="0.01" value="0.25" style="width:180px;">
                                     <code id="rag_similarity_value">0.25</code>
+                                    <!-- New: top K -->
+                                    <label for="rag_top_k" style="white-space:nowrap; margin-left:10px;">top_k</label>
+                                    <input id="rag_top_k" type="number" min="1" max="50" value="3" class="text_pole" style="width:70px;">
+
+                                    <!-- New: depth (iterations) -->
+                                    <label for="rag_depth" style="white-space:nowrap; margin-left:10px;">rag_depth</label>
+                                    <input id="rag_depth" type="number" min="1" max="10" value="1" class="text_pole" style="width:70px;">
 
                                 </div>
                             </div>

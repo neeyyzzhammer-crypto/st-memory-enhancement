@@ -364,6 +364,36 @@ function ensureCriticalThinkingMemoryField() {
     `);
     $stmRow.after($newRow);
 }
+function ensureRagFieldsRow() {
+    // No-op if all present (static template covers this case)
+    if ($('#enable_rag').length && $('#rag_similarity').length && $('#rag_top_k').length && $('#rag_depth').length) return;
+
+    // Fallback injection if needed (kept defensive)
+    const $anchor = $('#dataTable_short_term_memory').closest('div').parent();
+    if (!$anchor.length) return;
+
+    const topK = USER.tableBaseSetting.rag_top_k ?? 3;
+    const depth = USER.tableBaseSetting.rag_depth ?? 1;
+    const sim = (USER.tableBaseSetting.rag_similarity ?? 0.25).toFixed(2);
+
+    const $row = $(`
+        <div class="rag-row" style="display:flex; align-items:center; gap:8px; margin-top:6px; width:100%; flex-basis:100%;">
+            <label class="checkbox_label range-block justifyLeft" style="display:flex; align-items:center; gap:6px; margin:0;">
+                <input type="checkbox" id="enable_rag"><span>Enable Rag</span>
+            </label>
+            <label for="rag_similarity" style="white-space:nowrap; margin-left:10px;">rag_similarity</label>
+            <input id="rag_similarity" type="range" min="0" max="1" step="0.01" style="width:180px;" value="${sim}">
+            <code id="rag_similarity_value" style="min-width:40px; text-align:center;">${sim}</code>
+
+            <label for="rag_top_k" style="white-space:nowrap; margin-left:10px;">top_k</label>
+            <input id="rag_top_k" type="number" min="1" max="50" value="${topK}" class="text_pole" style="width:70px;">
+
+            <label for="rag_depth" style="white-space:nowrap; margin-left:10px;">rag_depth</label>
+            <input id="rag_depth" type="number" min="1" max="10" value="${depth}" class="text_pole" style="width:70px;">
+        </div>
+    `);
+    $anchor.after($row);
+}
 
 function InitBinging() {
     console.log('初始化绑定')
@@ -556,6 +586,8 @@ function InitBinging() {
         USER.tableBaseSetting.critical_thinking_memory = v;
         USER.saveSettings && USER.saveSettings();
     });
+    // Bind RAG controls (after rendering)
+    bindRagEvents();
     // 分步填表提示词
     $('#step_by_step_user_prompt').on('input', function () {
         USER.tableBaseSetting.step_by_step_user_prompt = $(this).val();
@@ -648,26 +680,7 @@ function InitBinging() {
     });
 
 }
-function ensureRagFieldsRow() {
-    // No-op if already present (when using static template this will exist)
-    if ($('#enable_rag').length && $('#rag_similarity').length) return;
 
-    // Fallback injection if needed (kept defensive)
-    const $anchor = $('#dataTable_short_term_memory').closest('div').parent();
-    if (!$anchor.length) return;
-
-    const $row = $(`
-        <div class="rag-row" style="display:flex; align-items:center; gap:8px; margin-top:6px; width:100%; flex-basis:100%;">
-            <label class="checkbox_label range-block justifyLeft" style="display:flex; align-items:center; gap:6px; margin:0;">
-                <input type="checkbox" id="enable_rag"><span>Enable Rag</span>
-            </label>
-            <label for="rag_similarity" style="white-space:nowrap; margin-left:10px;">rag_similarity</label>
-            <input id="rag_similarity" type="range" min="0" max="1" step="0.01" style="width:180px;">
-            <code id="rag_similarity_value" style="min-width:40px; text-align:center;">0.25</code>
-        </div>
-    `);
-    $anchor.after($row);
-}
 
 function bindRagEvents() {
     $('#enable_rag').off('change.rag').on('change.rag', function () {
@@ -687,6 +700,26 @@ function bindRagEvents() {
         $('#rag_similarity_value').text(USER.tableBaseSetting.rag_similarity.toFixed(2));
         USER.saveSettings && USER.saveSettings();
     });
+
+    // New: top_k
+    $('#rag_top_k').off('input.rag change.rag').on('input.rag change.rag', function () {
+        let v = parseInt(this.value, 10);
+        if (!Number.isFinite(v) || v < 1) v = 1;
+        if (v > 50) v = 50;
+        this.value = v;
+        USER.tableBaseSetting.rag_top_k = v;
+        USER.saveSettings && USER.saveSettings();
+    });
+
+    // New: depth
+    $('#rag_depth').off('input.rag change.rag').on('input.rag change.rag', function () {
+        let v = parseInt(this.value, 10);
+        if (!Number.isFinite(v) || v < 1) v = 1;
+        if (v > 10) v = 10;
+        this.value = v;
+        USER.tableBaseSetting.rag_depth = v;
+        USER.saveSettings && USER.saveSettings();
+    });
 }
 /**
  * 渲染设置
@@ -703,10 +736,16 @@ export function renderSetting() {
     ensureCriticalThinkingMemoryField();
     ensureRagFieldsRow();
 
-    // Initialize values
+    // Initialize RAG values
     updateSwitch('#enable_rag', USER.tableBaseSetting.enable_rag === true);
     $('#rag_similarity').val(USER.tableBaseSetting.rag_similarity ?? 0.25);
     $('#rag_similarity_value').text((USER.tableBaseSetting.rag_similarity ?? 0.25).toFixed(2));
+
+    // New: top_k and depth defaults
+    const topK = USER.tableBaseSetting.rag_top_k ?? 3;
+    const depth = USER.tableBaseSetting.rag_depth ?? 1;
+    $('#rag_top_k').val(topK);
+    $('#rag_depth').val(depth);
 
     $('#dataTable_short_term_memory').val(USER.tableBaseSetting.short_term_memory ?? 2);
     $('#dataTable_critical_thinking_memory').val(USER.tableBaseSetting.critical_thinking_memory ?? 1);
