@@ -63,6 +63,11 @@ export async function filterTableDataPopup(originalData, title, warning) {
     waitingRegister.deep = '#table_init_injection';
     waitingRegister.message_template = '#table_init_injection';
     waitingRegister.thinking_template = '#table_init_injection';
+
+    waitingRegister.enable_rag = '#table_init_injection';
+    waitingRegister.rag_similarity = '#table_init_injection';
+    waitingRegister.rag_top_k = '#table_init_injection';     // NEW
+    waitingRegister.rag_depth = '#table_init_injection'; 
     // 重新整理表格设置
     waitingRegister.confirm_before_execution = '#table_init_refresh_template';
     waitingRegister.use_main_api = '#table_init_refresh_template';
@@ -123,6 +128,8 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
     critical_thinking_memory: 1,          // NEW: how many past <critical_thinking> sections to include separately
     enable_rag: false,
     rag_similarity: 0.25,
+    rag_top_k: 3,       // NEW
+    rag_depth: 1,       // NEW
     /**
      * ===========================
      * 注入设置

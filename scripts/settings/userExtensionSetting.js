@@ -364,6 +364,7 @@ function ensureCriticalThinkingMemoryField() {
     `);
     $stmRow.after($newRow);
 }
+// Update ensureRagFieldsRow guard to avoid reinjection unless all IDs exist
 function ensureRagFieldsRow() {
     // No-op if all present (static template covers this case)
     if ($('#enable_rag').length && $('#rag_similarity').length && $('#rag_top_k').length && $('#rag_depth').length) return;
@@ -384,17 +385,14 @@ function ensureRagFieldsRow() {
             <label for="rag_similarity" style="white-space:nowrap; margin-left:10px;">rag_similarity</label>
             <input id="rag_similarity" type="range" min="0" max="1" step="0.01" style="width:180px;" value="${sim}">
             <code id="rag_similarity_value" style="min-width:40px; text-align:center;">${sim}</code>
-
             <label for="rag_top_k" style="white-space:nowrap; margin-left:10px;">top_k</label>
             <input id="rag_top_k" type="number" min="1" max="50" value="${topK}" class="text_pole" style="width:70px;">
-
             <label for="rag_depth" style="white-space:nowrap; margin-left:10px;">rag_depth</label>
             <input id="rag_depth" type="number" min="1" max="10" value="${depth}" class="text_pole" style="width:70px;">
         </div>
     `);
     $anchor.after($row);
 }
-
 function InitBinging() {
     console.log('初始化绑定')
     // 开始绑定事件
@@ -682,6 +680,7 @@ function InitBinging() {
 }
 
 
+// Call bindRagEvents after UI render (ensure it’s in InitBinging)
 function bindRagEvents() {
     $('#enable_rag').off('change.rag').on('change.rag', function () {
         USER.tableBaseSetting.enable_rag = this.checked;
@@ -701,7 +700,6 @@ function bindRagEvents() {
         USER.saveSettings && USER.saveSettings();
     });
 
-    // New: top_k
     $('#rag_top_k').off('input.rag change.rag').on('input.rag change.rag', function () {
         let v = parseInt(this.value, 10);
         if (!Number.isFinite(v) || v < 1) v = 1;
@@ -711,7 +709,6 @@ function bindRagEvents() {
         USER.saveSettings && USER.saveSettings();
     });
 
-    // New: depth
     $('#rag_depth').off('input.rag change.rag').on('input.rag change.rag', function () {
         let v = parseInt(this.value, 10);
         if (!Number.isFinite(v) || v < 1) v = 1;
@@ -740,12 +737,19 @@ export function renderSetting() {
     updateSwitch('#enable_rag', USER.tableBaseSetting.enable_rag === true);
     $('#rag_similarity').val(USER.tableBaseSetting.rag_similarity ?? 0.25);
     $('#rag_similarity_value').text((USER.tableBaseSetting.rag_similarity ?? 0.25).toFixed(2));
+    updateSwitch('#enable_rag', USER.tableBaseSetting.enable_rag === true);
+    $('#rag_similarity').val(USER.tableBaseSetting.rag_similarity ?? 0.25);
+    $('#rag_similarity_value').text((USER.tableBaseSetting.rag_similarity ?? 0.25).toFixed(2));
 
-    // New: top_k and depth defaults
-    const topK = USER.tableBaseSetting.rag_top_k ?? 3;
-    const depth = USER.tableBaseSetting.rag_depth ?? 1;
-    $('#rag_top_k').val(topK);
-    $('#rag_depth').val(depth);
+    // Initialize new fields
+    $('#rag_top_k').val(USER.tableBaseSetting.rag_top_k ?? 3);
+    $('#rag_depth').val(USER.tableBaseSetting.rag_depth ?? 1);
+
+    //// New: top_k and depth defaults
+    //const topK = USER.tableBaseSetting.rag_top_k ?? 3;
+    //const depth = USER.tableBaseSetting.rag_depth ?? 1;
+    //$('#rag_top_k').val(topK);
+    //$('#rag_depth').val(depth);
 
     $('#dataTable_short_term_memory').val(USER.tableBaseSetting.short_term_memory ?? 2);
     $('#dataTable_critical_thinking_memory').val(USER.tableBaseSetting.critical_thinking_memory ?? 1);
@@ -843,12 +847,18 @@ export function loadSettings() {
         }
     }
 
-    // 如果缺少新设置的默认值，则初始化
+    // Set missing defaults safely
     if (typeof USER.tableBaseSetting.short_term_memory !== 'number') {
         USER.tableBaseSetting.short_term_memory = 2;
     }
     if (typeof USER.tableBaseSetting.critical_thinking_memory !== 'number') {
         USER.tableBaseSetting.critical_thinking_memory = 1;
+    }
+    if (typeof USER.tableBaseSetting.rag_top_k !== 'number') {
+        USER.tableBaseSetting.rag_top_k = 3;   // NEW
+    }
+    if (typeof USER.tableBaseSetting.rag_depth !== 'number') {
+        USER.tableBaseSetting.rag_depth = 1;   // NEW
     }
 
     if (USER.tableBaseSetting.deep < 0) formatDeep();
