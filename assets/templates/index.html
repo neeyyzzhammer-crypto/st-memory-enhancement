@@ -50,14 +50,14 @@
                                     <div data-i18n="Import, export and reset plugin">导入导出与重置插件</div>
                                     <div class="flex-container">
                                         <div class="menu_button button-square-icon fa-solid fa-file-import"
-                                            id="table-set-import" title="导入表格预设"
-                                            data-i18n="[title]Import table presets"></div>
+                                             id="table-set-import" title="导入表格预设"
+                                             data-i18n="[title]Import table presets"></div>
                                         <!--                                        <input type="file" id="table-set-importFile" accept=".json" hidden>-->
                                         <div class="menu_button button-square-icon fa-solid fa-file-export"
-                                            id="table-set-export" title="导出表格预设"
-                                            data-i18n="[title]Export table presets"></div>
+                                             id="table-set-export" title="导出表格预设"
+                                             data-i18n="[title]Export table presets"></div>
                                         <div class="menu_button button-square-icon fa-solid fa-undo" id="table-reset"
-                                            title="重置表格预设" data-i18n="[title]Reset table presets"></div>
+                                             title="重置表格预设" data-i18n="[title]Reset table presets"></div>
                                     </div>
                             </div>
 
@@ -69,17 +69,16 @@
                             <!--                                    <input type="checkbox" id="table_switch_creator_mode"><span>创作者模式</span>-->
                             <!--                                </div>-->
                             <div class="checkbox_label range-block justifyLeft">
-                                <input type="checkbox" id="table_switch_debug_mode"><span
-                                    data-i18n="Debug mode">调试模式</span>
+                                <input type="checkbox" id="table_switch_debug_mode"><span data-i18n="Debug mode">调试模式</span>
                                 <small class="toggle-description justifyLeft"
-                                    data-i18n="Debug mode description">(开启后会有一定性能损耗，仅用于代码开发调试)</small>
+                                       data-i18n="Debug mode description">(开启后会有一定性能损耗，仅用于代码开发调试)</small>
                             </div>
 
                             <h4 data-i18n="Message template">消息模板</h4>
                             <div style="padding-left: 5px;">
                                 <label for="dataTable_message_template"></label>
                                 <small class="toggle-description justifyLeft"
-                                    data-i18n="Message template description">(用于给AI说明怎么使用表格以及怎么修改表格，使用<code>{{tableData}}</code>宏指令来选择表格数据的插入位置)</small>
+                                       data-i18n="Message template description">(用于给AI说明怎么使用表格以及怎么修改表格，使用<code>{{tableData}}</code>宏指令来选择表格数据的插入位置)</small>
                                 <textarea id="dataTable_message_template" class="wide100p" rows="8"></textarea>
                             </div>
                             <!-- 高级设置选项 -->
@@ -102,6 +101,10 @@
                                     <input id="dataTable_short_term_memory" type="number" min="-1" value="2" class="text_pole" style="min-width:45px" />
                                     <label for="dataTable_critical_thinking_memory" style="min-width:140px;white-space:nowrap;">CRM</label>
                                     <input id="dataTable_critical_thinking_memory" type="number" min="-1" value="1" class="text_pole" style="min-width:55px;">
+                                </div>
+                            </div>
+                            <div style="padding-left: 5px;">
+                                <div style="display: flex; align-items: center;">
                                     <!-- RAG settings -->
                                     <label class="checkbox_label range-block justifyLeft" style="display:flex; align-items:center; gap:6px; margin-left:10px;">
                                         <input type="checkbox" id="enable_rag"><span>Enable Rag</span>
@@ -116,9 +119,9 @@
                                     <!-- New: depth (iterations) -->
                                     <label for="rag_depth" style="white-space:nowrap; margin-left:10px;">rag_depth</label>
                                     <input id="rag_depth" type="number" min="1" max="10" value="1" class="text_pole" style="width:70px;">
-
                                 </div>
                             </div>
+                            
                         </div>
                         <div class="flex1 wide50p" style="min-width: 300px">
                             <!-- 表格预设 -->
