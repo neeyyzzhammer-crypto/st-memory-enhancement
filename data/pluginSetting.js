@@ -217,7 +217,7 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
             - There should be 5-8 points
 
             4. **OUTPUT FORMAT**
-            *  Write ONLY {{char}}'s internal thoughts, what {{char}} has percieved, all of 12 **primary drives** and all of 6 **core features** perspectives/debates and *Values* along with their change, core goals, tasks and plans, nothing else.  No external narration. Write only internal thoughts, don't describe {{char}}'s actions or surrounding, ommit  {{char}}'s actions or descriptions of external actions that are outside of {{char}}'s mind.
+            *  Write ONLY {{char}}'s internal thoughts, what {{char}} has percieved, all of main 12 (without Ω symbol) **primary drives** and all of 6 **core features** perspectives/debates and *Values* along with their change, core goals, tasks and plans, nothing else.  No external narration. Write only internal thoughts, don't describe {{char}}'s actions or surrounding, ommit  {{char}}'s actions or descriptions of external actions that are outside of {{char}}'s mind.
             *   Maintain character cognition matrix consistently.
             *   Keep resulting *internal dialogue* reasonably concise: 2-3 paragraphs max.
             *   Any  checks occurring during the *internal dialogue* should be presented mid-sentence in brackets (e.g. "Shit, we're all gonna die!!! [Survival (8): SUCCESS]")
