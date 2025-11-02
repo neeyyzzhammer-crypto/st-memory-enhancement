@@ -130,6 +130,8 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
     rag_similarity: 0.25,
     rag_top_k: 3,       // NEW
     rag_depth: 1,       // NEW
+
+    ollama_base_url: "",
     /**
      * ===========================
      * 注入设置
