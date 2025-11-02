@@ -223,10 +223,10 @@ async function applyShortTermMemoryWindow(nOverride) {
         if (!Array.isArray(chat) || chat.length === 0) return;
 
         const total = chat.length;
-        const disabled = rawN <= 0;
+        const disabled = rawN < 0;
 
         // Translate assistant-count to rough message count (assistant + preceding user)
-        let keepCount = disabled ? total : Math.min(total, rawN * 2);
+        let keepCount = disabled ? total : Math.min(total, rawN * 2+1);
 
         // Compute start index of window to remain visible
         const keepStartIndex = total - keepCount;
