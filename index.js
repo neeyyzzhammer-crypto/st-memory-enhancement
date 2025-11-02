@@ -746,7 +746,7 @@ async function onChatCompletionPromptReady(eventData) {
             console.warn('[RAG] vectorize on prompt-ready failed:', e);
         }
 
-        // SHORT TERM MEMORY = 0 => keep ONLY the latest user message before injection
+        // SHORT TERM MEMORY handling
         const stm = parseInt(
             USER.tableBaseSetting?.short_term_memory ??
             $('#dataTable_short_term_memory').val() ??
@@ -755,13 +755,11 @@ async function onChatCompletionPromptReady(eventData) {
         ) || 0;
 
         if (stm === 0) {
+            // Keep only the latest user message
             let lastUserIdx = -1;
             for (let i = eventData.chat.length - 1; i >= 0; i--) {
                 const m = eventData.chat[i];
-                if (m?.role === 'user') {
-                    lastUserIdx = i;
-                    break;
-                }
+                if (m?.role === 'user') { lastUserIdx = i; break; }
             }
             if (lastUserIdx !== -1) {
                 eventData.chat = [eventData.chat[lastUserIdx]];
@@ -769,7 +767,7 @@ async function onChatCompletionPromptReady(eventData) {
                 eventData.chat = eventData.chat.length ? [eventData.chat[eventData.chat.length - 1]] : [];
             }
         } else if (stm >= 0) {
-            // Optional: when stm > 0, keep a small tail window (N assistant turns + preceding users)
+            // When stm > 0, keep a small tail window (N assistant turns + preceding users)
             const total = eventData.chat.length;
             const keepCount = Math.min(total, stm * 2);
             eventData.chat = eventData.chat.slice(total - keepCount);
@@ -779,23 +777,40 @@ async function onChatCompletionPromptReady(eventData) {
         const thinkingContent = initThinkingData(eventData);
         const promptContent = await initTableDataWithRag(eventData);
         const role = getMesRole();
-        const inserts = [];
 
-        // Always inject the thinking template
-        inserts.push({ role, content: thinkingContent });
-
-        if (promptContent && promptContent.trim().length > 0) {
-            inserts.push({ role, content: promptContent });
+        // Locate last user after trimming
+        let lastUserIdx = -1;
+        for (let i = eventData.chat.length - 1; i >= 0; i--) {
+            if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
         }
 
-        if (inserts.length > 0) {
-            // Ensure the last message remains the user's turn.
-            // When deep <= 0, insert right before the last message.
-            const deepVal = Number.isFinite(USER.tableBaseSetting.deep) ? USER.tableBaseSetting.deep : 1;
-            const insertAt = deepVal <= 0
-                ? Math.max(eventData.chat.length - 1, 0)
-                : Math.max(eventData.chat.length - deepVal, 0);
-            eventData.chat.splice(insertAt, 0, ...inserts);
+        if (stm === 0) {
+            // Robust path: merge into the last user message so providers cannot drop it
+            const merged = [thinkingContent, promptContent]
+                .filter(s => typeof s === 'string' && s.trim().length > 0)
+                .join('\n\n');
+
+            if (merged && lastUserIdx !== -1) {
+                const prev = eventData.chat[lastUserIdx].content || '';
+                eventData.chat[lastUserIdx].content = `${merged}\n\n${prev}`;
+            }
+        } else {
+            // Existing path: insert as separate messages, ensuring the last message stays the user
+            const inserts = [];
+            if (typeof thinkingContent === 'string' && thinkingContent.trim().length > 0) {
+                inserts.push({ role, content: thinkingContent });
+            }
+            if (typeof promptContent === 'string' && promptContent.trim().length > 0) {
+                inserts.push({ role, content: promptContent });
+            }
+
+            if (inserts.length > 0) {
+                const deepVal = Number.isFinite(USER.tableBaseSetting.deep) ? USER.tableBaseSetting.deep : 1;
+                const insertAt = (deepVal <= 0)
+                    ? (lastUserIdx >= 0 ? lastUserIdx : Math.max(eventData.chat.length - 1, 0))
+                    : Math.max(eventData.chat.length - deepVal, 0);
+                eventData.chat.splice(insertAt, 0, ...inserts);
+            }
         }
 
         updateSheetsView();
