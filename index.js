@@ -806,26 +806,25 @@ async function onChatCompletionPromptReady(eventData) {
                 eventData.chat[lastUserIdx].content = `${merged}\n\n${prev}`;
             }
         } else {
-            // Always merge thinking into the last user message to guarantee inclusion
+            // Prepend thinking + message_template into the last user message (preserves order)
             const hasThinking = typeof thinkingContent === 'string' && thinkingContent.trim().length > 0;
-            if (hasThinking && lastUserIdx !== -1) {
+            const hasPrompt = typeof promptContent === 'string' && promptContent.trim().length > 0;
+
+            if (lastUserIdx !== -1 && (hasThinking || hasPrompt)) {
                 const prev = eventData.chat[lastUserIdx].content || '';
-                eventData.chat[lastUserIdx].content = `${thinkingContent}\n\n${prev}`;
-            } else if (hasThinking) {
-                // Fallback if no user message found
-                eventData.chat.splice(Math.max(eventData.chat.length - 1, 0), 0, { role: role || 'user', content: thinkingContent });
-            }
+                const parts = [];
+                if (hasThinking) parts.push(thinkingContent);
+                if (hasPrompt) parts.push(promptContent);
+                eventData.chat[lastUserIdx].content = `${parts.join('\n\n')}\n\n${prev}`;
+            } else if (hasThinking || hasPrompt) {
+                // Fallback if no user message found: insert near the end
+                const inserts = [];
+                if (hasThinking) inserts.push({ role, content: thinkingContent });
+                if (hasPrompt) inserts.push({ role, content: promptContent });
 
-            // Inject promptContent as separate message, keeping the last message as user
-            const inserts = [];
-            if (typeof promptContent === 'string' && promptContent.trim().length > 0) {
-                inserts.push({ role, content: promptContent });
-            }
-
-            if (inserts.length > 0) {
                 const deepVal = Number.isFinite(USER.tableBaseSetting.deep) ? USER.tableBaseSetting.deep : 1;
                 const insertAt = (deepVal <= 0)
-                    ? (lastUserIdx >= 0 ? lastUserIdx : Math.max(eventData.chat.length - 1, 0))
+                    ? Math.max(eventData.chat.length - 1, 0)
                     : Math.max(eventData.chat.length - deepVal, 0);
                 eventData.chat.splice(insertAt, 0, ...inserts);
             }
