@@ -768,10 +768,10 @@ async function onChatCompletionPromptReady(eventData) {
             } else {
                 eventData.chat = eventData.chat.length ? [eventData.chat[eventData.chat.length - 1]] : [];
             }
-        } else if (stm > 0) {
+        } else if (stm >= 0) {
             // Optional: when stm > 0, keep a small tail window (N assistant turns + preceding users)
             const total = eventData.chat.length;
-            const keepCount = Math.min(total, stm * 2 + 1);
+            const keepCount = Math.min(total, stm * 2);
             eventData.chat = eventData.chat.slice(total - keepCount);
         }
 
