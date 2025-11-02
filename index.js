@@ -788,10 +788,10 @@ async function onChatCompletionPromptReady(eventData) {
             $('#dataTable_critical_thinking_memory').val() ?? '0',
             10
         );
-        const hasThinkingTemplate =
-            typeof USER.tableBaseSetting?.thinking_template === 'string' &&
-            USER.tableBaseSetting.thinking_template.trim().length > 0;
-        const injectThinking = !(Number.isFinite(crmRaw) && crmRaw < 0) && hasThinkingTemplate;
+        //const hasThinkingTemplate =
+        //    typeof USER.tableBaseSetting?.thinking_template === 'string' &&
+        //    USER.tableBaseSetting.thinking_template.trim().length > 0;
+        const injectThinking = true; // !(Number.isFinite(crmRaw) && crmRaw < 0) && hasThinkingTemplate;
 
         if (injectThinking) {
             // Push even if <previous_thinking> resolves empty; template itself is considered required
