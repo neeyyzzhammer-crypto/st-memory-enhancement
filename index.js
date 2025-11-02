@@ -781,33 +781,21 @@ async function onChatCompletionPromptReady(eventData) {
         const role = getMesRole();
         const inserts = [];
 
-        // Always inject the thinking template when critical_thinking_memory >= 0
-        // Only skip when it is explicitly set to a negative value
-        const crmRaw = parseInt(
-            USER.tableBaseSetting?.critical_thinking_memory ??
-            $('#dataTable_critical_thinking_memory').val() ?? '0',
-            10
-        );
-        //const hasThinkingTemplate =
-        //    typeof USER.tableBaseSetting?.thinking_template === 'string' &&
-        //    USER.tableBaseSetting.thinking_template.trim().length > 0;
-        const injectThinking = true; // !(Number.isFinite(crmRaw) && crmRaw < 0) && hasThinkingTemplate;
-
-        if (injectThinking) {
-            // Push even if <previous_thinking> resolves empty; template itself is considered required
-            inserts.push({ role, content: thinkingContent });
-        }
+        // Always inject the thinking template
+        inserts.push({ role, content: thinkingContent });
 
         if (promptContent && promptContent.trim().length > 0) {
             inserts.push({ role, content: promptContent });
         }
 
         if (inserts.length > 0) {
-            if (USER.tableBaseSetting.deep === 0) {
-                eventData.chat.push(...inserts);
-            } else {
-                eventData.chat.splice(-USER.tableBaseSetting.deep, 0, ...inserts);
-            }
+            // Ensure the last message remains the user's turn.
+            // When deep <= 0, insert right before the last message.
+            const deepVal = Number.isFinite(USER.tableBaseSetting.deep) ? USER.tableBaseSetting.deep : 1;
+            const insertAt = deepVal <= 0
+                ? Math.max(eventData.chat.length - 1, 0)
+                : Math.max(eventData.chat.length - deepVal, 0);
+            eventData.chat.splice(insertAt, 0, ...inserts);
         }
 
         updateSheetsView();
