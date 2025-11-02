@@ -732,6 +732,7 @@ async function onChatCompletionPromptReady(eventData) {
             USER.tableBaseSetting.injection_mode === "injection_off") {
             return;
         }
+
         // Ensure RAG vectors exist for the latest user message (source chat text)
         try {
             if (USER.tableBaseSetting.enable_rag && window.ST_RAG?.vectorizeMessageByIndex) {
@@ -744,6 +745,7 @@ async function onChatCompletionPromptReady(eventData) {
         } catch (e) {
             console.warn('[RAG] vectorize on prompt-ready failed:', e);
         }
+
         // SHORT TERM MEMORY = 0 => only keep the latest user message before injection
         const stm = parseInt(
             USER.tableBaseSetting?.short_term_memory ??
@@ -770,14 +772,23 @@ async function onChatCompletionPromptReady(eventData) {
 
         // Build injections AFTER trimming
         const thinkingContent = initThinkingData(eventData);
-        // NEW: build message template content with {{past_events}} injected via RAG
         const promptContent = await initTableDataWithRag(eventData);
         const role = getMesRole();
         const inserts = [];
 
-        if (thinkingContent && thinkingContent.trim().length > 0) {
+        // NEW: inject thinking template when critical_thinking_memory >= 0 (0 means include)
+        const crmRaw = parseInt(
+            USER.tableBaseSetting?.critical_thinking_memory ??
+            $('#dataTable_critical_thinking_memory').val() ?? '0',
+            10
+        );
+        const injectThinking = !(Number.isFinite(crmRaw) && crmRaw < 0);
+        const hasThinkingTemplate = !!(USER.tableBaseSetting?.thinking_template && USER.tableBaseSetting.thinking_template.trim().length > 0);
+
+        if (injectThinking && hasThinkingTemplate) {
             inserts.push({ role, content: thinkingContent });
         }
+
         if (promptContent && promptContent.trim().length > 0) {
             inserts.push({ role, content: promptContent });
         }
