@@ -572,7 +572,7 @@ function InitBinging() {
     // Delegated binding to survive dynamic re-renders
     $(document).on('input.shortTermMemory', '#dataTable_short_term_memory', function () {
         let v = parseInt(this.value, 10);
-        if (isNaN(v) || v < 1) v = 1;
+        if (isNaN(v) || v < 0) v = 0;
         this.value = v;
         USER.tableBaseSetting.short_term_memory = v;
         USER.saveSettings && USER.saveSettings();
