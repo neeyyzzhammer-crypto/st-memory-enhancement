@@ -101,7 +101,7 @@ async function getOllamaEmbedding(text) {
     const base = guessOllamaBase();
     const model = getStore().model || DEFAULT_EMBED_MODEL;
     try {
-        const res = await fetch(`${base}/api/embeddings`, {
+        const res = await fetch(`${base}/api/embed`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model, prompt: text }),
