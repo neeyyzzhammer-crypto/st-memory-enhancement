@@ -746,7 +746,7 @@ async function onChatCompletionPromptReady(eventData) {
             console.warn('[RAG] vectorize on prompt-ready failed:', e);
         }
 
-        // SHORT TERM MEMORY = 0 => only keep the latest user message before injection
+        // SHORT TERM MEMORY = 0 => keep ONLY the latest user message before injection
         const stm = parseInt(
             USER.tableBaseSetting?.short_term_memory ??
             $('#dataTable_short_term_memory').val() ??
@@ -768,6 +768,11 @@ async function onChatCompletionPromptReady(eventData) {
             } else {
                 eventData.chat = eventData.chat.length ? [eventData.chat[eventData.chat.length - 1]] : [];
             }
+        } else if (stm > 0) {
+            // Optional: when stm > 0, keep a small tail window (N assistant turns + preceding users)
+            const total = eventData.chat.length;
+            const keepCount = Math.min(total, stm * 2 + 1);
+            eventData.chat = eventData.chat.slice(total - keepCount);
         }
 
         // Build injections AFTER trimming
@@ -776,16 +781,20 @@ async function onChatCompletionPromptReady(eventData) {
         const role = getMesRole();
         const inserts = [];
 
-        // NEW: inject thinking template when critical_thinking_memory >= 0 (0 means include)
+        // Always inject the thinking template when critical_thinking_memory >= 0
+        // Only skip when it is explicitly set to a negative value
         const crmRaw = parseInt(
             USER.tableBaseSetting?.critical_thinking_memory ??
             $('#dataTable_critical_thinking_memory').val() ?? '0',
             10
         );
-        const injectThinking = !(Number.isFinite(crmRaw) && crmRaw < 0);
-        const hasThinkingTemplate = !!(USER.tableBaseSetting?.thinking_template && USER.tableBaseSetting.thinking_template.trim().length > 0);
+        const hasThinkingTemplate =
+            typeof USER.tableBaseSetting?.thinking_template === 'string' &&
+            USER.tableBaseSetting.thinking_template.trim().length > 0;
+        const injectThinking = !(Number.isFinite(crmRaw) && crmRaw < 0) && hasThinkingTemplate;
 
-        if (injectThinking && hasThinkingTemplate) {
+        if (injectThinking) {
+            // Push even if <previous_thinking> resolves empty; template itself is considered required
             inserts.push({ role, content: thinkingContent });
         }
 
@@ -805,7 +814,7 @@ async function onChatCompletionPromptReady(eventData) {
     } catch (error) {
         EDITOR.error(`记忆插件：表格数据注入失败\n原因：`, error.message, error);
     }
-    console.log("注入表格总体提示词 + 思考提示词 (with STM=0 & CRM support + RAG past_events)", eventData.chat);
+    console.log("注入表格总体提示词 + 思考提示词 (STM handling + CRM support + RAG past_events)", eventData.chat);
 }
 /**
  * 宏获取提示词
