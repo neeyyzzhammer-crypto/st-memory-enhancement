@@ -796,7 +796,7 @@ async function onChatCompletionPromptReady(eventData) {
         }
 
         if (stm === 0) {
-            // Robust path: merge into the last user message so providers cannot drop it
+            // Merge both thinking + prompt into the last user message
             const merged = [thinkingContent, promptContent]
                 .filter(s => typeof s === 'string' && s.trim().length > 0)
                 .join('\n\n');
@@ -806,11 +806,18 @@ async function onChatCompletionPromptReady(eventData) {
                 eventData.chat[lastUserIdx].content = `${merged}\n\n${prev}`;
             }
         } else {
-            // Existing path: insert as separate messages, ensuring the last message stays the user
-            const inserts = [];
-            if (typeof thinkingContent === 'string' && thinkingContent.trim().length > 0) {
-                inserts.push({ role, content: thinkingContent });
+            // Always merge thinking into the last user message to guarantee inclusion
+            const hasThinking = typeof thinkingContent === 'string' && thinkingContent.trim().length > 0;
+            if (hasThinking && lastUserIdx !== -1) {
+                const prev = eventData.chat[lastUserIdx].content || '';
+                eventData.chat[lastUserIdx].content = `${thinkingContent}\n\n${prev}`;
+            } else if (hasThinking) {
+                // Fallback if no user message found
+                eventData.chat.splice(Math.max(eventData.chat.length - 1, 0), 0, { role: role || 'user', content: thinkingContent });
             }
+
+            // Inject promptContent as separate message, keeping the last message as user
+            const inserts = [];
             if (typeof promptContent === 'string' && promptContent.trim().length > 0) {
                 inserts.push({ role, content: promptContent });
             }
