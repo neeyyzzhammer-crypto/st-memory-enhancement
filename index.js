@@ -70,6 +70,7 @@ async function __buildPastEventsFromRag(eventData) {
 }
 
 /* === PATCH: initTableData with RAG past_events injection === */
+/* === PATCH: initTableData with RAG injection (Memory -> past_events, RAG -> long_term_memory) === */
 async function initTableDataWithRag(eventData) {
     const template = USER.tableBaseSetting.message_template || '';
 
@@ -92,20 +93,30 @@ async function initTableDataWithRag(eventData) {
         }
     }
 
-    // NEW: compute past_events via RAG
-    let pastEvents = '';
-    if (template.includes('{{past_events}}')) {
-        pastEvents = await __buildPastEventsFromRag(eventData);
+    // Build RAG-selected text (complementary to memory table)
+    let ragText = '';
+    if (USER.tableBaseSetting?.enable_rag && template.match(/{{\s*(long_term_memory|past_events)\s*}}/)) {
+        ragText = await __buildPastEventsFromRag(eventData);
     }
 
+    // Replacement rules when using RAG:
+    // - {{tableData}} -> Memory Table (unchanged)
+    // - {{past_events}} -> Memory Table (same as no-RAG)
+    // - {{long_term_memory}} -> RAG-selected content
     let replaced = template.replace(/{{tableData}}/g, tableData);
-    replaced = replaced.replace(/{{past_events}}/g, pastEvents);
+    replaced = replaced.replace(/{{past_events}}/g, tableData);
+    replaced = replaced.replace(/{{long_term_memory}}/g, ragText);
 
-    if (!template.includes('{{tableData}}')) {
-        console.warn('[Memory Enhancement] message_template missing {{tableData}}.');
+    if (!template.includes('{{tableData}}') && !template.includes('{{past_events}}')) {
+        console.warn('[Memory Enhancement] message_template missing {{tableData}} or {{past_events}} to carry Memory Table.');
     } else if (!tableData) {
         console.warn('[Memory Enhancement] Memory Table export empty (no rows or no table).');
     }
+    // Optional notice if RAG is enabled but no placeholder exists
+    if (USER.tableBaseSetting?.enable_rag && !template.includes('{{long_term_memory}}')) {
+        console.warn('[RAG] message_template missing {{long_term_memory}} placeholder for RAG content.');
+    }
+
     return replaceUserTag(replaced);
 }
 /**
