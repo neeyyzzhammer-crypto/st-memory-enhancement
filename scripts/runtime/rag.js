@@ -92,16 +92,66 @@ function cosineSim(a, b) {
     return sum / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-// Try to determine Ollama base URL
-function guessOllamaBase() {
-    return 'http://ollama:11434';
+// Try to determine Ollama base URL with overrides and probing
+let __OLLAMA_BASE_CACHE = null;
+
+function getOllamaOverride() {
+    // User-overridable endpoints if provided in settings
+    return (
+        USER?.IMPORTANT_USER_PRIVACY_DATA?.ollama_base_url ||
+        USER?.tableBaseSetting?.ollama_base_url ||
+        null
+    );
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 1500) {
+    const ctrl = new AbortController();
+    const id = setTimeout(() => ctrl.abort('timeout'), timeoutMs);
+    try {
+        const res = await fetch(url, { ...options, signal: ctrl.signal });
+        return res;
+    } finally {
+        clearTimeout(id);
+    }
+}
+
+async function probeBase(base) {
+    try {
+        const res = await fetchWithTimeout(`${base}/api/version`, { method: 'GET' }, 1500);
+        if (res && res.ok) return true;
+    } catch (_) { /* ignore */ }
+    return false;
+}
+
+async function resolveOllamaBase() {
+    if (__OLLAMA_BASE_CACHE) return __OLLAMA_BASE_CACHE;
+
+    const override = getOllamaOverride();
+    const candidates = Array.from(new Set([
+        override,
+        'http://localhost:11434',
+        'http://127.0.0.1:11434',
+        // keep docker-name last; browser often can't resolve it
+        'http://ollama:11434',
+    ].filter(Boolean)));
+
+    for (const base of candidates) {
+        if (await probeBase(base)) {
+            __OLLAMA_BASE_CACHE = base;
+            return base;
+        }
+    }
+
+    // Fall back to last candidate (likely fails) to preserve behavior
+    __OLLAMA_BASE_CACHE = candidates[candidates.length - 1] || 'http://localhost:11434';
+    return __OLLAMA_BASE_CACHE;
 }
 
 async function getOllamaEmbedding(text) {
-    const base = guessOllamaBase();
+    const base = await resolveOllamaBase();
     const model = getStore().model || DEFAULT_EMBED_MODEL;
     try {
-        const res = await fetch(`${base}/api/embed`, {
+        const res = await fetch(`${base}/api/embeddings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model, prompt: text }),
@@ -116,7 +166,9 @@ async function getOllamaEmbedding(text) {
         }
         throw new Error('Unexpected Ollama embeddings response format.');
     } catch (e) {
-        EDITOR.warning('[RAG] Embedding fetch failed (Ollama).', e.message);
+        // Browser-side failures could be DNS or CORS. Add a hint once.
+        console.warn('[RAG] Embedding fetch failed (Ollama):', e?.message || e);
+        EDITOR.warning('[RAG] Embedding fetch failed (Ollama).', e.message || '');
         return null;
     }
 }
