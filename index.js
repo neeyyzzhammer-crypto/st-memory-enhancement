@@ -226,7 +226,7 @@ async function applyShortTermMemoryWindow(nOverride) {
         const disabled = rawN < 0;
 
         // Translate assistant-count to rough message count (assistant + preceding user)
-        let keepCount = disabled ? total : Math.min(total, rawN * 2+1);
+        let keepCount = disabled ? total : Math.min(total, rawN * 2);
 
         // Compute start index of window to remain visible
         const keepStartIndex = total - keepCount;
