@@ -131,30 +131,55 @@ export function lazy(uid, interval = 100) {
 
 
 /**
- * 使用原生 JavaScript 方法计算字符串的 MD5 哈希值
- * @param {string} string 要计算哈希的字符串
- * @returns {Promise<string>}  返回一个 Promise，resolve 值为十六进制表示的 MD5 哈希字符串
+ * Calculate a stable hash of a string.
+ * - Uses SubtleCrypto SHA-256 when available.
+ * - Falls back to a fast JS FNV-1a hash in non-secure contexts.
+ * Note: Not for security-sensitive use.
+ * @param {string} input
+ * @param {string} [algorithm='SHA-256'] One of SHA-256, SHA-384, SHA-512 (when supported)
+ * @returns {Promise<string>} hex string
  */
-export async function calculateStringHash(string) {
-    // 检查string是否为字符串
-    if (typeof string !== 'string') {
+export async function calculateStringHash(input, algorithm = 'SHA-256') {
+    if (typeof input !== 'string') {
         throw new Error('The input value is not a string.');
     }
 
-    // 步骤 1: 将字符串编码为 Uint8Array
-    const textEncoder = new TextEncoder();
-    const data = textEncoder.encode(string);
+    // Fast JS fallback: 32-bit FNV-1a
+    const fnv1a32 = (str) => {
+        let h = 0x811c9dc5 >>> 0;
+        for (let i = 0; i < str.length; i++) {
+            h ^= str.charCodeAt(i);
+            // h *= 16777619 (with 32-bit overflow)
+            h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+        }
+        return h.toString(16).padStart(8, '0');
+    };
 
-    // 步骤 2: 使用 crypto.subtle.digest 计算哈希值
-    // 仅适用于非安全敏感的场景，例如数据校验。
-    const hashBuffer = await crypto.subtle.digest('MD5', data);
+    const toHex = (buf) => Array.from(new Uint8Array(buf))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
 
-    // 步骤 3: 将 ArrayBuffer 转换为十六进制字符串
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray
-        .map(byte => byte.toString(16).padStart(2, '0')) // 将每个字节转换为两位十六进制字符串
-        .join(''); // 连接成一个完整的十六进制字符串
+    try {
+        if (globalThis.crypto?.subtle?.digest) {
+            const data = new TextEncoder().encode(input);
 
-    return hashHex;
+            // Try requested algorithm first, then fallbacks commonly supported by browsers.
+            const algos = [algorithm, 'SHA-256', 'SHA-384', 'SHA-512'];
+            for (const algo of algos) {
+                try {
+                    const hashBuffer = await crypto.subtle.digest(algo, data);
+                    return toHex(hashBuffer);
+                } catch (e) {
+                    // NotSupportedError -> try next algo
+                    if (e && e.name === 'NotSupportedError') continue;
+                    throw e;
+                }
+            }
+            // If none worked, drop to JS fallback
+        }
+    } catch {
+        // Ignore and use fallback
+    }
+    return fnv1a32(input);
 }
 
