@@ -13,7 +13,7 @@ import { APP, USER, SYSTEM, EDITOR } from '../../core/manager.js';
  */
 
 const RAG_STORE_KEY = 'rag_store_v1';
-const DEFAULT_EMBED_MODEL = 'embeddinggemma';
+const DEFAULT_EMBED_MODEL = 'embeddinggemma:latest';
 const MAX_LEN_CHARS = 2000; // base message trimming
 const TOP_K = 3;
 
