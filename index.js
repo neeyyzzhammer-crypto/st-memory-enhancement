@@ -100,11 +100,9 @@ async function initTableDataWithRag(eventData) {
     }
 
     // Replacement rules when using RAG:
-    // - {{tableData}} -> Memory Table (unchanged)
-    // - {{past_events}} -> Memory Table (same as no-RAG)
+    // - {{tableData}} -> Memory Table (unchanged)    
     // - {{long_term_memory}} -> RAG-selected content
-    let replaced = template.replace(/{{tableData}}/g, tableData);
-    replaced = replaced.replace(/{{past_events}}/g, tableData);
+    let replaced = template.replace(/{{tableData}}/g, tableData);    
     replaced = replaced.replace(/{{long_term_memory}}/g, ragText);
 
     if (!template.includes('{{tableData}}') && !template.includes('{{past_events}}')) {

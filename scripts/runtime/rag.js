@@ -18,13 +18,13 @@ const MAX_LEN_CHARS = 2000; // base message trimming
 const TOP_K = 3;
 
 // Attachment chunking
-const CHUNK_OVERLAP_RATIO = 0.15;
+const CHUNK_OVERLAP_RATIO = 0.05;
 
 // Keep attachments at large chunks
 const ATTACH_CHUNK_SIZE = 2000;
 
-// New: message chunking defaults (200 chars windows with 15% overlap)
-const MSG_CHUNK_SIZE = 200;
+// New: message chunking defaults (1000 chars windows with 15% overlap)
+const MSG_CHUNK_SIZE = 1000;
 
 function getStride(size, overlapRatio) {
     const overlap = Math.floor(size * overlapRatio);
@@ -439,12 +439,25 @@ async function bagSearchByText(text, threshold, topK, depth) {
         frontier = nextFrontier;
     }
 
+    // Re-score vs. the original query
     const allItems = Array.from(bag.values()).map(it => ({
         ...it,
         score: cosineSim(emb, it.emb),
     }));
-    allItems.sort((a, b) => b.score - a.score);
-    return allItems;
+
+    // Deduplicate by normalized text content; keep the highest-scoring item per text
+    const normalizeText = (s) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const bestByText = new Map();
+    for (const it of allItems) {
+        const key = normalizeText(it.text);
+        if (!key) continue;
+        const prev = bestByText.get(key);
+        if (!prev || it.score > prev.score) bestByText.set(key, it);
+    }
+
+    const deduped = Array.from(bestByText.values());
+    deduped.sort((a, b) => b.score - a.score);
+    return deduped;
 }
 
 // Backward-compatible entry point

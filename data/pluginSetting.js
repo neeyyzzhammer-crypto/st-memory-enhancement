@@ -244,10 +244,6 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
 
     {{long_term_memory}}
 
-    ## Past events overall memory:
-
-    {{past_events}}
-
     # Memory Enhancement Table Guide New
 
 ## Purpose
