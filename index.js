@@ -126,6 +126,9 @@ function updateLongTermSummary({ narration, thinking, main, summary }) {
 function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
     const S = USER.tableBaseSetting || {};
     const block = `<${blockLabel}>\n\`\`\`\n${content}\n\`\`\`\n</${blockLabel}>`;
+    if (blocklable === 'main') {
+        block = `<${blockLabel}>\n\n${content}\n\n</${blockLabel}>`;
+    }
     const msg = USER.getContext().chat[msgIndex];
     const prev = msg.mes ?? msg.content ?? '';
     const updated = prev ? (prev + '\n\n' + block) : block;
@@ -975,7 +978,7 @@ async function onChatCompletionPromptReady(eventData) {
 
         // Build components of STM pipeline
         const promptContent = await initTableDataWithRag(eventData); // processed message_template (tableData + long_term_memory)
-        const thinkingContent = '';// initThinkingData(eventData);         // thinking_template with previous critical thinking memory
+        const thinkingContent = initThinkingData(eventData);         // thinking_template with previous critical thinking memory
 
         const role = getMesRole();
         let lastUserIdx = -1;
@@ -1141,8 +1144,8 @@ function getLatestAssistantCriticalThinkingSection() {
 // PATCH: enhance thinking data to support multi previous critical thinking sections (CRM setting)
 function initThinkingData(eventData) {
     try {
-        let tpl = USER.tableBaseSetting?.thinking_template || '';
-        if (!tpl || typeof tpl !== 'string') return '';
+        let tpl = '';// USER.tableBaseSetting?.thinking_template || '';
+        //if (!tpl || typeof tpl !== 'string') return '';
         // Critical thinking memory (CRM) count
         const crmCount = parseInt(
             USER.tableBaseSetting?.critical_thinking_memory ??
