@@ -341,6 +341,7 @@ function __createAssistantShellMessage() {
     return {
         name: name2,
         mes: '',
+        content: '',            // ADDED: alias used by older handlers (e.g. translateMessageEdit)
         is_user: false,
         is_system: false,
         send_date: Date.now(),
@@ -372,6 +373,17 @@ function __renderMessageByIndex(idx) {
     try { APP?.eventSource?.emit?.(APP.event_types.CHAT_CHANGED); return true; } catch { }
     return false;
 }
+
+// Compatibility: emit only object payloads (numeric-only payload was breaking listeners
+// that assume an object and access .is_system). Older listeners still work because
+// they can read payload.id / payload.message.
+function __emitMessageLifecycle(eventSource, event_types, idx, msg) {
+    const payload = { id: idx, message: msg };
+    try { eventSource.emit(event_types.MESSAGE_UPDATED, payload); } catch { }
+    try { eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, payload); } catch { }
+    // STREAM_TOKEN_RECEIVED already emits an object elsewhere
+}
+
 function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
     const ctx = USER.getContext();
     const { eventSource, event_types, messageFormatting } = ctx;
@@ -380,24 +392,21 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
     const msg = ctx.chat[msgIndex];
     if (!msg) return;
 
-    // Build block
     const block = (blockLabel === 'main')
         ? `<${blockLabel}>\n\n${content}\n\n</${blockLabel}>`
         : `<${blockLabel}>\n\`\`\`\n${content}\n\`\`\`\n</${blockLabel}>`;
 
-    // Append
     const prev = msg.mes || '';
     const updated = prev ? (prev + '\n\n' + block) : block;
     msg.mes = updated;
+    msg.content = updated;                 // ADDED: keep content in sync for legacy consumers
     msg.swipes = Array.isArray(msg.swipes) ? msg.swipes : [''];
     msg.swipe_id = typeof msg.swipe_id === 'number' ? msg.swipe_id : 0;
     msg.swipes[msg.swipe_id] = updated;
 
-    // Keep display_text in sync for builds that use it for rendering
     msg.extra = msg.extra || {};
     msg.extra.display_text = msg.mes;
 
-    // Optional: re‑vectorize for RAG
     if (S.enable_rag && window.ST_RAG?.purgeMessageEmbeddings && window.ST_RAG?.vectorizeMessageByIndex) {
         try {
             window.ST_RAG.purgeMessageEmbeddings(msgIndex);
@@ -407,12 +416,10 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
         }
     }
 
-    // Table edit trigger
     if (opts.triggerTableEdit === true && S.isAiWriteTable && /<tableEdit>/.test(updated)) {
         try { handleEditStrInMessage(msg, msgIndex, true); } catch (e) { console.warn('[MultiStage] table edit parse failed:', e); }
     }
 
-    // Formatting pass (keeps sanitizer consistent)
     if (typeof messageFormatting === 'function') {
         try {
             msg.formatted_mes = messageFormatting(
@@ -429,26 +436,19 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
         }
     }
 
-    // Best-effort streaming-like event (safe-wrapped)
     try {
         if (event_types?.STREAM_TOKEN_RECEIVED) {
             eventSource.emit(event_types.STREAM_TOKEN_RECEIVED, {
                 id: msgIndex,
-                text: block,              // delta-ish content
+                text: block,
                 state: { reasoning: null, image: null },
             });
         }
-    } catch (e) {
-        // ignore
-    }
+    } catch { }
 
-    // Emit update events (both index and payload variants to satisfy different builds)
-    try { eventSource.emit(event_types.MESSAGE_UPDATED, msgIndex); } catch { }
-    try { eventSource.emit(event_types.MESSAGE_UPDATED, { id: msgIndex, message: msg }); } catch { }
-    try { eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, msgIndex); } catch { }
-    try { eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, { id: msgIndex, message: msg }); } catch { }
+    // REPLACED: only emit object payloads (removed raw index emissions)
+    __emitMessageLifecycle(eventSource, event_types, msgIndex, msg);
 
-    // Hard refresh fallback if events aren’t enough
     const rendered = __renderMessageByIndex(msgIndex);
     if (!rendered) {
         try { APP?.eventSource?.emit?.(APP.event_types.CHAT_CHANGED); } catch { }
@@ -456,7 +456,6 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
 
     updateSystemMessageTableStatus();
 }
-
 window.__stm_llm_deferral = {
     tokenSource: null,
     abortController: null,
@@ -618,10 +617,10 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase, cancellati
     addOneMessage(shell, { scroll: true });
     const baseAssistantIndex = ctx.chat.length - 1;
     try {
-        // Emit a "sent/received" pair so renderers that depend on these update correctly
-        eventSource.emit(event_types.MESSAGE_SENT, baseAssistantIndex);
-        eventSource.emit(event_types.MESSAGE_RECEIVED, baseAssistantIndex);
-        eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, baseAssistantIndex);
+        const shellPayload = { id: baseAssistantIndex, message: ctx.chat[baseAssistantIndex] };
+        eventSource.emit(event_types.MESSAGE_SENT, shellPayload);
+        eventSource.emit(event_types.MESSAGE_RECEIVED, shellPayload);
+        eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, shellPayload);
     } catch { }
 
 
