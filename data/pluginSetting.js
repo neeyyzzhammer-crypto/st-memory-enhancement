@@ -139,6 +139,9 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
      */
     injection_mode: 'deep_system',
     deep: 2,
+    narration_template: '',
+    main_response_template: '',
+    long_term_summary_template: '',
     thinking_template: `
     Latest thoughts and feelings:
         <previous_thinking>

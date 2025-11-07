@@ -561,6 +561,19 @@ function InitBinging() {
         const value = $(this).val();
         USER.tableBaseSetting.message_template = value;
     })
+
+    $('#dataTable_thinking_template').on('input', function () {
+        USER.tableBaseSetting.thinking_template = $(this).val();
+    });
+    $('#dataTable_narration_template').on('input', function () {
+        USER.tableBaseSetting.narration_template = $(this).val();
+    });
+    $('#dataTable_main_response_template').on('input', function () {
+        USER.tableBaseSetting.main_response_template = $(this).val();
+    });
+    $('#dataTable_long_term_summary_template').on('input', function () {
+        USER.tableBaseSetting.long_term_summary_template = $(this).val();
+    });
     // 表格深度
     $('#dataTable_deep').on("input", function () {
         const value = $(this).val();
@@ -727,6 +740,10 @@ export function renderSetting() {
     $(`#table_to_chat_mode option[value="${USER.tableBaseSetting.table_to_chat_mode}"]`).prop('selected', true);
     $(`#table_cell_width_mode option[value="${USER.tableBaseSetting.table_cell_width_mode}"]`).prop('selected', true);
     $('#dataTable_message_template').val(USER.tableBaseSetting.message_template);
+    $('#dataTable_thinking_template').val(USER.tableBaseSetting.thinking_template || '');
+    $('#dataTable_narration_template').val(USER.tableBaseSetting.narration_template || '');
+    $('#dataTable_main_response_template').val(USER.tableBaseSetting.main_response_template || '');
+    $('#dataTable_long_term_summary_template').val(USER.tableBaseSetting.long_term_summary_template || '');
 
     $('#dataTable_deep').val(USER.tableBaseSetting.deep);
     ensureShortTermMemoryField();
