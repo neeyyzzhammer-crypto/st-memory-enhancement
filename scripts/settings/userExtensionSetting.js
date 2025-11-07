@@ -878,6 +878,25 @@ export function loadSettings() {
         USER.tableBaseSetting.rag_depth = 1;   // NEW
     }
 
+    // Lorebook defaults (no UI controls; prevent "not found" warnings)
+    if (typeof USER.tableBaseSetting.lorebook_query_source !== 'string') {
+        // 'last_user' | 'stm'
+        USER.tableBaseSetting.lorebook_query_source = 'last_user';
+    }
+    if (typeof USER.tableBaseSetting.lorebook_min_score !== 'number') {
+        USER.tableBaseSetting.lorebook_min_score = 0.25;
+    }
+    if (typeof USER.tableBaseSetting.lorebook_top_k !== 'number') {
+        USER.tableBaseSetting.lorebook_top_k = 5;
+    }
+    if (typeof USER.tableBaseSetting.lorebook_max_chars !== 'number') {
+        USER.tableBaseSetting.lorebook_max_chars = 4000;
+    }
+    // Optional but recommended: default for the stage toggle
+    if (typeof USER.tableBaseSetting.enable_lorebook_stages !== 'boolean') {
+        USER.tableBaseSetting.enable_lorebook_stages = false;
+    }
+
     if (USER.tableBaseSetting.deep < 0) formatDeep();
 
     renderSetting();
