@@ -373,7 +373,11 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         ts: Date.now()
     });
     const baseAssistantIndex = ctx.chat.length - 1;
-
+    // NEW: persist and force UI to mount the new message node before appending blocks
+    try { await ctx.saveChat?.(); } catch { }
+    try { APP?.eventSource?.emit?.(APP.event_types.CHAT_CHANGED); } catch { }
+    // Yield to let the DOM create .mes[mesid="${baseAssistantIndex}"]
+    await new Promise(r => setTimeout(r, 0));
     stmBase = stmBase.replace(/<BEAT>/g, '');
     stmBase = stmBase.replace(/<SEX>/g, '');
 
@@ -1267,12 +1271,19 @@ async function onChatCompletionPromptReady(eventData) {
             .filter(v => v !== '')
             .join('\n');
 
-        // MULTI-STAGE: consume the finalized stmBase; do NOT touch eventData.chat history.
         if ((USER.tableBaseSetting.narration_template || '').trim() &&
             (USER.tableBaseSetting.main_response_template || '').trim() &&
             USER.tableBaseSetting.step_by_step !== true) {
+
             const handled = await __runIncrementalMultiStageResponse(eventData, stmBase);
-            if (handled) return;
+            if (handled) {
+                // NEW: swallow default provider pipeline
+                eventData._consumedByMemoryEnhancement = true;
+                eventData._preventDefault = true;
+                // safest: leave no payload to send
+                eventData.chat = [];
+                return; // do not allow the normal LLM call to proceed
+            }
         }
 
         // Fallback (legacy single-shot path) if multi-stage disabled or not configured.
