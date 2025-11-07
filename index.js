@@ -456,6 +456,101 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
 
     updateSystemMessageTableStatus();
 }
+
+
+// ADD THIS HELPER (place near other helpers, e.g. above onChatCompletionPromptReady)
+function __buildStmBase(eventData, promptContent, thinkingContent, stm) {
+    const S = USER.tableBaseSetting || {};
+    const { userName, charName } = getCurrentChatNames();
+    const fullChat = Array.isArray(USER.getContext()?.chat) ? USER.getContext().chat : [];
+    const keepPairs = stm > 0 ? Math.min(stm, Math.ceil(fullChat.length / 2)) : null;
+
+    // Build a filtered slice based on short term memory (assistant + preceding user)
+    let indices = [];
+    if (keepPairs === null) {
+        indices = fullChat.map((_, i) => i);
+    } else {
+        // Walk backwards collecting assistant messages and their preceding user
+        let assistants = 0;
+        for (let i = fullChat.length - 1; i >= 0 && assistants < keepPairs; i--) {
+            const m = fullChat[i];
+            if (m && m.is_user === false) {
+                assistants++;
+                indices.push(i);
+                // preceding user (if exists)
+                if (i - 1 >= 0 && fullChat[i - 1].is_user === true) indices.push(i - 1);
+            }
+        }
+        indices = Array.from(new Set(indices)).sort((a, b) => a - b);
+    }
+
+    // Fallback: if nothing collected, take all
+    if (indices.length === 0) indices = fullChat.map((_, i) => i);
+
+    const applyNameMacros = (s) => {
+        if (typeof s !== 'string') return '';
+        return s
+            .replace(/{{user}}/gi, userName)
+            .replace(/<user>/g, userName)
+            .replace(/{{char}}/gi, charName)
+            .replace(/{{character}}/gi, charName);
+    };
+
+    const stripReasoning = (text) => {
+        if (typeof text !== 'string') return '';
+        if (S.keep_reasoning_in_stmBase === true) return text;
+        return text.replace(/<critical_thinking>[\s\S]*?<\/critical_thinking>/gi, '');
+    };
+
+    const lines = [];
+
+    // Include any system/world-info messages from eventData.chat first (retain ordering there)
+    if (Array.isArray(eventData.chat)) {
+        eventData.chat.forEach(m => {
+            if (m.role === 'system') {
+                const body = m.content || m.mes || '';
+                if (body.trim()) lines.push(body.trim());
+            }
+        });
+    }
+
+    // Prepend injected thinking + table prompt content (only once)
+    const injectedBlocks = [thinkingContent, promptContent].filter(t => typeof t === 'string' && t.trim());
+    if (injectedBlocks.length) {
+        lines.push('### INJECTED CONTEXT START ###');
+        injectedBlocks.forEach(b => lines.push(applyNameMacros(b.trim())));
+        lines.push('### INJECTED CONTEXT END ###');
+    }
+
+    // Append conversation messages (user + assistant)
+    indices.forEach(i => {
+        const m = fullChat[i];
+        if (!m) return;
+        const raw = (typeof m.content === 'string' ? m.content : (typeof m.mes === 'string' ? m.mes : '')).trim();
+        if (!raw) return;
+
+        if (m.is_user === true) {
+            lines.push(`User(${userName}): ${applyNameMacros(raw)}`);
+        } else {
+            lines.push(`${charName || 'Assistant'}: ${applyNameMacros(stripReasoning(raw))}`);
+        }
+    });
+
+    // Add long-term summary (if exists) at tail to help stages
+    try {
+        const lts = getLongTermSummary();
+        if (lts) lines.push(`\n[LONG_TERM_SUMMARY]\n${applyNameMacros(lts.trim())}\n[/LONG_TERM_SUMMARY]`);
+    } catch { }
+
+    // Preserve any lorebook block already added inside system messages of eventData.chat
+    // (Already included above if present)
+
+    // Final base
+    const stmBase = replaceUserTag(lines.join('\n').replace(/\r/g, ''));
+    return stmBase;
+}
+
+
 async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     const S = USER.tableBaseSetting || {};
     const narrationTpl = (S.narration_template || '').trim();
@@ -540,7 +635,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     let narrationLoreSource = [narrationTpl, previousSummary].filter(Boolean).join('\n\n');
     narrationLoreSource = __applyNameMacros(narrationLoreSource);
 
-    let loreAppendix = await __buildLorebookAppendix(eventData, narrationLoreSource);
+    let loreAppendix = '';// await __buildLorebookAppendix(eventData, narrationLoreSource);
     let loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
     loreBlock = __applyNameMacros(loreBlock);
 
@@ -1397,14 +1492,7 @@ async function onChatCompletionPromptReady(eventData) {
 
         // Derive stmBase (FULL raw prompt to feed multi-stage):
         // Priority: augmented last user message; else concatenation of inserted system/user messages.
-        let stmBase = eventData.chat
-            .map(m => {
-                const v = typeof m?.content === 'string' ? m.content
-                    : (typeof m?.mes === 'string' ? m.mes : '');
-                return typeof v === 'string' && v.length > 0 ? v : '';
-            })
-            .filter(v => v !== '')
-            .join('\n');
+        const stmBase = __buildStmBase(eventData, promptContent, thinkingContent, stm);
 
         // Decide early if we will take over generation (and cancel default LLM immediately)
         const hasAnyStage = ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
