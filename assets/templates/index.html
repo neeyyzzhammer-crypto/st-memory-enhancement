@@ -72,34 +72,34 @@
                             <div style="padding-left: 5px;">
                                 <label for="dataTable_message_template"></label>
                                 <small class="toggle-description justifyLeft"
-                                       data-i18n="Message template description">(Used to tell the AI how to use and modify tables. Use <code>{{tableData}}</code> to choose where table data is inserted.)</small>
+                                       data-i18n="Message template description">()</small>
                                 <textarea id="dataTable_message_template" class="wide100p" rows="8"></textarea>
-                            </div>
-                            <!-- NEW: Thinking Template -->
-                            <h4 data-i18n="Thinking template">Thinking template</h4>
-                            <div style="padding-left: 5px;">
-                                <small class="toggle-description justifyLeft">(Injected into the current thinking preface area; supports the <code>&lt;previous_thinking&gt;</code> placeholder.)</small>
-                                <textarea id="dataTable_thinking_template" class="wide100p" rows="8"></textarea>
                             </div>
 
                             <!-- NEW: Narration Template -->
                             <h4 data-i18n="Narration template">Narration template</h4>
                             <div style="padding-left: 5px;">
-                                <small class="toggle-description justifyLeft">(Not auto-injected yet; stored for future use.)</small>
+                                <small class="toggle-description justifyLeft">(Contains narrator related prompts. Needs tag for previous_summary.)</small>
                                 <textarea id="dataTable_narration_template" class="wide100p" rows="6"></textarea>
+                            </div>
+                            <!-- NEW: Thinking Template -->
+                            <h4 data-i18n="Thinking template">Thinking template</h4>
+                            <div style="padding-left: 5px;">
+                                <small class="toggle-description justifyLeft">(Former critical_thinking section. Prompts related to thinking. Injected into the current thinking preface area; supports the <code>&lt;previous_thinking&gt;</code> placeholder. Needs tags for previos stages too.)</small>
+                                <textarea id="dataTable_thinking_template" class="wide100p" rows="8"></textarea>
                             </div>
 
                             <!-- NEW: Main Response Template -->
                             <h4 data-i18n="Main response template">Main response template</h4>
                             <div style="padding-left: 5px;">
-                                <small class="toggle-description justifyLeft">(Not auto-injected yet; stored for future use.)</small>
+                                <small class="toggle-description justifyLeft">(Response of a character, should contain aggregated character related prompts. Also should contain tableEdit and insertRow instructions as they are processed on that stage now. Needd tags for previos stages too.)</small>
                                 <textarea id="dataTable_main_response_template" class="wide100p" rows="6"></textarea>
                             </div>
 
                             <!-- NEW: Long Term Summary Template -->
                             <h4 data-i18n="Long term summary template">Long term summary template</h4>
                             <div style="padding-left: 5px;">
-                                <small class="toggle-description justifyLeft">(Not auto-injected yet; stored for future use.)</small>
+                                <small class="toggle-description justifyLeft">(Long term memory summary of events, contains prompts for it. Define the format properly. Needs tags for previos stages too.)</small>
                                 <textarea id="dataTable_long_term_summary_template" class="wide100p" rows="6"></textarea>
                             </div>
                             <!-- 高级设置选项 -->
