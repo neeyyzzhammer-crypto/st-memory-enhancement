@@ -534,7 +534,7 @@ function __stm_raceWithAbort(p, cancellationHandle) {
     }
     return p;
 }
-async function __runIncrementalMultiStageResponse(eventData, stmBase) {    
+async function __runIncrementalMultiStageResponse(eventData, stmBase, cancellationHandle) {    
     cancellationHandle = __getCancellationHandleFallback(cancellationHandle);
 
     const S = USER.tableBaseSetting || {};
