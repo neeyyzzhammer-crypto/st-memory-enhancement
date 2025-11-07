@@ -38,28 +38,31 @@ window.__stm_ms_state = {
     controller: null,
 };
 
-// Add this helper near the long-term summary helpers
-function __getLastMessageLongTermSummary() {
-    try {
-        const chat = USER.getContext()?.chat || [];
-        for (let i = chat.length - 1; i >= 0; i--) {
-            const m = chat[i];
-            if (!m || m.is_user === true) continue;
+function __stm_markConsumed() {
+    window.__stm_ms_state.inProgress = false;
+    window.__stm_ms_state.consumed = true;
+}
 
-            // Prefer structured storage
-            const s = m?.extra?.long_term_summary;
-            if (typeof s === 'string' && s.trim()) return s.trim();
+function __stm_begin() {
+    window.__stm_ms_state.consumed = false;
+    window.__stm_ms_state.inProgress = true;
+    window.__stm_ms_state.controller = new AbortController();
+    return window.__stm_ms_state.controller;
+}
 
-            // Fallback: parse from body tag if present
-            const body = (typeof m.mes === 'string' ? m.mes : (typeof m.content === 'string' ? m.content : ''));
-            if (!body) continue;
-            const mt = body.match(/<long_term_summary>\s*([\s\S]*?)\s*<\/long_term_summary>/i);
-            if (mt && mt[1] && mt[1].trim()) return mt[1].trim();
-        }
-    } catch (e) {
-        console.warn('[LTS] Failed to extract last message long_term_summary:', e);
+window.stMemoryEnhancement = window.stMemoryEnhancement || {};
+window.stMemoryEnhancement.cancelMultiStage = function(reason = 'user_cancel') {
+    const st = window.__stm_ms_state;
+    if (st.inProgress && st.controller) {
+        try { st.controller.abort(); } catch {}
+        st.inProgress = false;
+        console.log('[MultiStage] Aborted multi-stage generation:', reason);
     }
-    return '';
+};
+
+// Hard suppression hook invoked from prompt ready
+function __stm_shouldSuppressDefaultLLM() {
+    return window.__stm_ms_state && window.__stm_ms_state.consumed === true;
 }
 // Add near other small helpers (above onMessageReceived)
 function __normalizeMessageIndex(arg) {
@@ -150,12 +153,9 @@ function __getBranchData(branchId) {
     return store.branches[branchId];
 }
 
-// Modify getLongTermSummary to prefer the last message's stored summary
 function getLongTermSummary() {
-    // 1) Prefer the last assistant message carrying a long_term_summary
-    const lastMsgSummary = __getLastMessageLongTermSummary();
-    if (lastMsgSummary) return lastMsgSummary;
-    return '';
+    const branchId = __getActiveBranchId();
+    return __getBranchData(branchId).summary || '';
 }
 
 function updateLongTermSummary({ narration, thinking, main, summary }) {
@@ -710,32 +710,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             summary: summaryResp
         });        
     }
-    if (longTermSummaryTpl) {
-        // existing code that builds summaryResp...
-        const rawSummary = await callStage(summaryPrompt);
-        const { text: summaryResp } = __sanitizeDeepSeekOutput(rawSummary, 'main');
 
-        // 1) Attach to the message itself (preferred source of truth)
-        try {
-            const msg = ctx.chat[baseAssistantIndex];
-            msg.extra = msg.extra || {};
-            msg.extra.long_term_summary = summaryResp?.trim() || '';
-
-            // Optional: keep a hidden tag in mes for portability (won't be rendered specially)
-            // Avoid if you don't want it in UI text:
-            // msg.mes = `${msg.mes}\n<!-- <long_term_summary>${summaryResp}</long_term_summary> -->`;
-        } catch (e) {
-            console.warn('[LTS] Failed to attach long_term_summary to message:', e);
-        }
-
-        // 2) Maintain legacy branch store for backward compatibility
-        updateLongTermSummary({
-            narration: narrationResp,
-            thinking: thinkingResp,
-            main: mainResp,
-            summary: summaryResp
-        });
-    }
     try { await saveChat?.(); } catch { }
     try { updateSheetsView(baseAssistantIndex); } catch { }
 
@@ -1517,7 +1492,14 @@ async function onChatCompletionPromptReady(eventData) {
 
         // Derive stmBase (FULL raw prompt to feed multi-stage):
         // Priority: augmented last user message; else concatenation of inserted system/user messages.
-        const stmBase = __buildStmBase(eventData, promptContent, thinkingContent, stm);
+        let stmBase = eventData.chat
+            .map(m => {
+                const v = typeof m?.content === 'string' ? m.content
+                    : (typeof m?.mes === 'string' ? m.mes : '');
+                return typeof v === 'string' && v.length > 0 ? v : '';
+            })
+            .filter(v => v !== '')
+            .join('\n');
 
         // Decide early if we will take over generation (and cancel default LLM immediately)
         const hasAnyStage = ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
@@ -1614,7 +1596,7 @@ function getLatestAssistantCriticalThinkingSection() {
 // PATCH: enhance thinking data to support multi previous critical thinking sections (CRM setting)
 function initThinkingData(eventData) {
     try {
-        let tpl = '<previous_thinking>';// USER.tableBaseSetting?.thinking_template || '';
+        let tpl = '';// USER.tableBaseSetting?.thinking_template || '';
         //if (!tpl || typeof tpl !== 'string') return '';
         // Critical thinking memory (CRM) count
         const crmCount = parseInt(
