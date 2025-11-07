@@ -322,9 +322,6 @@ function __renderMessageByIndex(idx) {
     try { APP?.eventSource?.emit?.(APP.event_types.CHAT_CHANGED); return true; } catch { }
     return false;
 }
-// Replace existing definition with this version
-// Fix typo and const reassignment in appendBlockToAssistant
-// Safer incremental block appender using ST events
 function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
     const ctx = USER.getContext();
     const { eventSource, event_types, messageFormatting } = ctx;
@@ -342,7 +339,13 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
     const prev = msg.mes || '';
     const updated = prev ? (prev + '\n\n' + block) : block;
     msg.mes = updated;
+    msg.swipes = Array.isArray(msg.swipes) ? msg.swipes : [''];
+    msg.swipe_id = typeof msg.swipe_id === 'number' ? msg.swipe_id : 0;
     msg.swipes[msg.swipe_id] = updated;
+
+    // Keep display_text in sync for builds that use it for rendering
+    msg.extra = msg.extra || {};
+    msg.extra.display_text = msg.mes;
 
     // Optional: re‑vectorize for RAG
     if (S.enable_rag && window.ST_RAG?.purgeMessageEmbeddings && window.ST_RAG?.vectorizeMessageByIndex) {
@@ -376,27 +379,33 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
         }
     }
 
-    // Emit update + render events so UI refreshes
+    // Best-effort streaming-like event (safe-wrapped)
     try {
-        eventSource.emit(event_types.MESSAGE_UPDATED, msgIndex);
-        eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, msgIndex);
+        if (event_types?.STREAM_TOKEN_RECEIVED) {
+            eventSource.emit(event_types.STREAM_TOKEN_RECEIVED, {
+                id: msgIndex,
+                text: block,              // delta-ish content
+                state: { reasoning: null, image: null },
+            });
+        }
     } catch (e) {
-        console.warn('[MultiStage] Event emit failed:', e);
+        // ignore
+    }
+
+    // Emit update events (both index and payload variants to satisfy different builds)
+    try { eventSource.emit(event_types.MESSAGE_UPDATED, msgIndex); } catch { }
+    try { eventSource.emit(event_types.MESSAGE_UPDATED, { id: msgIndex, message: msg }); } catch { }
+    try { eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, msgIndex); } catch { }
+    try { eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, { id: msgIndex, message: msg }); } catch { }
+
+    // Hard refresh fallback if events aren’t enough
+    const rendered = __renderMessageByIndex(msgIndex);
+    if (!rendered) {
+        try { APP?.eventSource?.emit?.(APP.event_types.CHAT_CHANGED); } catch { }
     }
 
     updateSystemMessageTableStatus();
 }
-// ================= Incremental Multi‑Stage Generation (Narration -> Thinking -> Main) =================
-// Replace existing definition with this version
-// Incremental Multi‑Stage Generation (Narration -> Thinking -> Main -> LongTermSummary)
-// Strictly uses STM pipeline output (message_template-expanded string) as the base.
-// No message history selection/filtering is used for LLM calls.
-// Update signature to accept eventData, and inject lorebook blocks into every stage prompt
-// Replace the existing __runIncrementalMultiStageResponse(stmBase) definition with:
-// PATCH: Augment narration stage with conditional world-info scan before showing to user.
-// If narration output contains any of <BEAT>, <MAJORE>, <MINORE>, <MOB>, <BOSS>,
-// run lorebook/world-info engine on (narrationPrompt + narrationResp), append result,
-// then proceed with normal narration stage steps.
 async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     const S = USER.tableBaseSetting || {};
     const narrationTpl = (S.narration_template || '').trim();
@@ -426,21 +435,45 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     const ctx = USER.getContext();
     const { addOneMessage, eventSource, event_types, saveChat } = ctx;
 
+    // Stage caller with robust fallback: Custom -> Main
     async function callStage(payload) {
         const messages = [{ role: 'user', content: payload }];
-        let raw;
-        if (useMainAPI) raw = await handleMainAPIRequest(messages, null, true);
-        else raw = await handleCustomAPIRequest(messages, null, true, true);
-        if (raw === 'suspended') return '';
-        return typeof raw === 'string' ? raw.trim() : '';
+        const tryMain = async () => {
+            try {
+                const raw = await handleMainAPIRequest(messages, null, true); // silent
+                return (raw === 'suspended' || typeof raw !== 'string') ? '' : raw.trim();
+            } catch {
+                return '';
+            }
+        };
+        const tryCustom = async () => {
+            try {
+                const raw = await handleCustomAPIRequest(messages, null, true, true); // step-by-step=true, silent=true
+                return (raw === 'suspended' || typeof raw !== 'string') ? '' : raw.trim();
+            } catch {
+                return '';
+            }
+        };
+
+        if (useMainAPI) {
+            let r = await tryMain();
+            if (!r) r = await tryCustom();
+            return r || '';
+        } else {
+            let r = await tryCustom();
+            if (!r) r = await tryMain();
+            return r || '';
+        }
     }
 
     // Create and render shell using official API
     const shell = __createAssistantShellMessage();
-    ctx.chat.push(shell); // push first to keep indices consistent
+    ctx.chat.push(shell); // keep index in sync with chat
     addOneMessage(shell, { scroll: true });
     const baseAssistantIndex = ctx.chat.length - 1;
     try {
+        // Emit a "sent/received" pair so renderers that depend on these update correctly
+        eventSource.emit(event_types.MESSAGE_SENT, baseAssistantIndex);
         eventSource.emit(event_types.MESSAGE_RECEIVED, baseAssistantIndex);
         eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, baseAssistantIndex);
     } catch { }
@@ -467,25 +500,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
 
     const rawNarration = await callStage(narrationPrompt2);
     let { text: narrationResp } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
-
-    //// NEW: If key tags are present, run world-info scan on (prompt + response) and append to narration before showing
-    //try {
-    //    const TAG_PATTERN = /<(BEAT|MAJORE|MINORE|MOB|BOSS|SEX)>/i;
-    //    if (TAG_PATTERN.test(narrationResp)) {
-    //        const scanSource = [narrationPrompt, narrationResp].join('\n');
-    //        loreAppendix = await __buildLorebookAppendix(eventData, scanSource);
-    //        loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
-    //        narrationPrompt2 = [narrationPrompt, loreBlock].filter(Boolean).join('\n\n');
-    //        rawNarration = await callStage(narrationPrompt2);
-    //        let { text: narrationResp } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
-    //    }
-    //} catch (e) {
-    //    console.warn('[Narration] World-info augmentation failed:', e);
-    //}
-
-    appendBlockToAssistant(baseAssistantIndex, 'narration', narrationResp, { triggerTableEdit: false });
-    
-
+    appendBlockToAssistant(baseAssistantIndex, 'narration', narrationResp || '(no narration)', { triggerTableEdit: false });
 
     // Stage 2: Thinking (optional)
     let thinkingResp = '';
@@ -1341,17 +1356,21 @@ async function onChatCompletionPromptReady(eventData) {
             .filter(v => v !== '')
             .join('\n');
 
-        if ((USER.tableBaseSetting.narration_template || '').trim() &&
-            (USER.tableBaseSetting.main_response_template || '').trim() &&
-            USER.tableBaseSetting.step_by_step !== true) {
+        // Decide early if we will take over generation (and cancel default LLM immediately)
+        const hasAnyStage = ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
+            ((USER.tableBaseSetting.main_response_template || '').trim().length > 0);
+        const canHandle = USER.tableBaseSetting.step_by_step !== true && hasAnyStage;
+
+        if (canHandle) {
+            // Cancel default generation BEFORE any async work to avoid the extra call
+            __cancelDefaultLLM(eventData);
+            eventData.handledByMemoryEnhancement = true;
 
             const handled = await __runIncrementalMultiStageResponse(eventData, stmBase);
-            if (handled) {
-                __cancelDefaultLLM(eventData);
-                // Do NOT wipe eventData.chat (keeping it avoids empty-history side effects)
-                return;
-            }
+            // Even if handled=false, we keep default cancelled to prevent double LLM calls
+            return;
         }
+
 
         // Fallback (legacy single-shot path) if multi-stage disabled or not configured.
         // Nothing further needed: STM already injected. We just update sheets view.
