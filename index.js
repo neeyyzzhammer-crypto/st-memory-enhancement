@@ -1494,11 +1494,8 @@ async function onChatCompletionPromptReady(eventData) {
         // Priority: augmented last user message; else concatenation of inserted system/user messages.
         let stmBase = eventData.chat
             .map(m => {
-                const v = typeof m?.content === 'string' ? m.content
-                    : (typeof m?.mes === 'string' ? m.mes : '');
-                return typeof v === 'string' && v.length > 0 ? v : '';
-            })
-            .filter(v => v !== '')
+                return JSON.stringify(m)
+            })            
             .join('\n');
 
         // Decide early if we will take over generation (and cancel default LLM immediately)
