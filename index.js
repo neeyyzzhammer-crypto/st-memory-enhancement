@@ -1312,12 +1312,9 @@ async function onChatCompletionPromptReady(eventData) {
 
             const handled = await __runIncrementalMultiStageResponse(eventData, stmBase);
             if (handled) {
-                // NEW: swallow default provider pipeline
-                eventData._consumedByMemoryEnhancement = true;
-                eventData._preventDefault = true;
-                // safest: leave no payload to send
-                eventData.chat = [];
-                return; // do not allow the normal LLM call to proceed
+                __cancelDefaultLLM(eventData);
+                // Do NOT wipe eventData.chat (keeping it avoids empty-history side effects)
+                return;
             }
         }
 
