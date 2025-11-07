@@ -744,7 +744,13 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
 
     // Stage 4: Long Term Summary (do NOT append to UI; update store only)
     if (longTermSummaryTpl) {
-        const lastUserMessage = __getLastUserMessageText(eventData);
+        const ui = __getLastUserMessageIndex();
+        const chatArr = USER.getContext()?.chat || [];
+        const lastUserMessage = ui !== -1
+            ? (typeof chatArr[ui]?.content === 'string'
+                ? chatArr[ui].content
+                : (typeof chatArr[ui]?.mes === 'string' ? chatArr[ui].mes : ''))
+            : '';
 
         let summaryPrompt = [
             stmBase,
