@@ -95,7 +95,12 @@ export async function filterTableDataPopup(originalData, title, warning) {
     waitingRegister.to_chat_container = '#table_init_to_chat';
     // 所有表格结构数据
     waitingRegister.tableStructure = '#table_init_structure';
-
+    // inside filterTableDataPopup(), after existing waitingRegister assignments:
+    waitingRegister.enable_lorebook_stages = '#table_init_injection';
+    waitingRegister.lorebook_query_source = '#table_init_injection';
+    waitingRegister.lorebook_min_score = '#table_init_injection';
+    waitingRegister.lorebook_top_k = '#table_init_injection';
+    waitingRegister.lorebook_max_chars = '#table_init_injection';
     await confirmation.show();
     if (!confirmation.result) return { filterData: null, confirmation: false };
 
@@ -130,7 +135,11 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
     rag_similarity: 0.25,
     rag_top_k: 3,       // NEW
     rag_depth: 1,       // NEW
-
+    enable_lorebook_stages: false,
+    lorebook_query_source: 'last_user',   // 'last_user' | 'stm'
+    lorebook_min_score: 0.25,
+    lorebook_top_k: 5,
+    lorebook_max_chars: 4000,
     ollama_base_url: "",
     /**
      * ===========================
