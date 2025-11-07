@@ -120,18 +120,95 @@ function updateLongTermSummary({ narration, thinking, main, summary }) {
     });
     try { USER.getContext().saveChat?.(); } catch { }
 }
+// NEW: High-level Lorebook engine caller (tries ST's native world-info builders first)
+async function __callLorebookEngine(queryText, S = {}) {
+    const opts = {
+        // Suggested toggles if the underlying API supports them
+        useActivation: true,
+        useNegative: true,
+        respectProfileSettings: true,
+        topK: Number.isFinite(S.lorebook_top_k) ? S.lorebook_top_k : undefined,
+        minScore: typeof S.lorebook_min_score === 'number' ? S.lorebook_min_score : undefined,
+    };
+
+    // Normalize various possible result shapes into a single string
+    const normalize = (res) => {
+        if (!res) return '';
+        if (typeof res === 'string') return res;
+        if (Array.isArray(res)) {
+            const parts = res
+                .map(e => (e?.content ?? e?.value ?? e?.text ?? '').toString().trim())
+                .filter(Boolean);
+            return parts.join('\n\n');
+        }
+        if (typeof res === 'object') {
+            if (typeof res.text === 'string') return res.text;
+            if (Array.isArray(res.entries)) return normalize(res.entries);
+            if (Array.isArray(res.items)) return normalize(res.items);
+        }
+        return '';
+    };
+
+    try {
+        // Preferred dedicated adapters
+        if (window.ST_LORE?.buildContextForText) {
+            const res = await window.ST_LORE.buildContextForText(queryText, opts);
+            const out = normalize(res);
+            if (out) return out;
+        }
+        if (window.ST_LORE?.collectForText) {
+            const res = await window.ST_LORE.collectForText(queryText, opts);
+            const out = normalize(res);
+            if (out) return out;
+        }
+
+        // Common SillyTavern world-info engines (names vary by build)
+        if (typeof window.applyWorldInfoForText === 'function') {
+            const res = await window.applyWorldInfoForText(queryText, opts);
+            const out = normalize(res);
+            if (out) return out;
+        }
+        if (typeof window.applyWorldInfoToPrompt === 'function') {
+            const res = await window.applyWorldInfoToPrompt(queryText, opts);
+            const out = normalize(res);
+            if (out) return out;
+        }
+        if (window.worldInfo?.buildContextForText) {
+            const res = await window.worldInfo.buildContextForText(queryText, opts);
+            const out = normalize(res);
+            if (out) return out;
+        }
+        if (window.worldInfo?.applyToText) {
+            const res = await window.worldInfo.applyToText(queryText, opts);
+            const out = normalize(res);
+            if (out) return out;
+        }
+
+        // Historic helper that may already apply triggers in some builds
+        if (typeof window.getWorldInfoForText === 'function') {
+            const res = await window.getWorldInfoForText(queryText, opts);
+            const out = normalize(res);
+            if (out) return out;
+        }
+    } catch (e) {
+        console.warn('[Lorebook] Engine call failed:', e);
+    }
+
+    return '';
+}
+
 // Add near other helpers (e.g., after __buildPastEventsFromRag)
+// Replace existing __buildLorebookAppendix with this version to call ST's lorebook engine first
 async function __buildLorebookAppendix(eventData, baseText) {
     try {
         const S = USER.tableBaseSetting || {};
         if (S.enable_lorebook_stages !== true) return '';
 
-        // Select query source
+        // Choose query source
         let queryText = '';
         if ((S.lorebook_query_source || 'last_user') === 'stm') {
             queryText = typeof baseText === 'string' ? baseText : '';
         } else {
-            // last user content from current event data
             if (eventData && Array.isArray(eventData.chat)) {
                 for (let i = eventData.chat.length - 1; i >= 0; i--) {
                     const m = eventData.chat[i];
@@ -145,9 +222,17 @@ async function __buildLorebookAppendix(eventData, baseText) {
         }
         if (!queryText) return '';
 
+        const maxChars = Number.isFinite(S.lorebook_max_chars) ? S.lorebook_max_chars : 4000;
+
+        // 1) Try the native SillyTavern lorebook/world-info engine (applies triggers, negatives, chances, etc.)
+        const engineText = await __callLorebookEngine(queryText, S);
+        if (engineText) {
+            return engineText.length > maxChars ? engineText.slice(0, maxChars) : engineText;
+        }
+
+        // 2) Fallback: similarity searches (does NOT replicate full lorebook logic)
         const minScore = (typeof S.lorebook_min_score === 'number') ? S.lorebook_min_score : 0.25;
         const topK = Number.isFinite(S.lorebook_top_k) ? S.lorebook_top_k : 5;
-        const maxChars = Number.isFinite(S.lorebook_max_chars) ? S.lorebook_max_chars : 4000;
 
         const out = [];
         const push = (t) => {
@@ -157,7 +242,6 @@ async function __buildLorebookAppendix(eventData, baseText) {
             if (!out.includes(v)) out.push(v);
         };
 
-        // 1) Preferred: dedicated lore search adapter (if provided by another extension)
         if (window.ST_LORE?.searchSimilarByText) {
             try {
                 const results = await window.ST_LORE.searchSimilarByText(queryText, minScore, topK);
@@ -168,18 +252,6 @@ async function __buildLorebookAppendix(eventData, baseText) {
                     });
                 }
             } catch (e) { console.warn('[Lorebook] ST_LORE.searchSimilarByText failed:', e); }
-        }
-
-        // 2) Common SillyTavern world info helpers (names vary by ST version/build)
-        if (out.length === 0 && typeof window.getWorldInfoForText === 'function') {
-            try {
-                const entries = await window.getWorldInfoForText(queryText);
-                if (Array.isArray(entries)) {
-                    entries.forEach(e => {
-                        push(e?.content || e?.value || e?.text || '');
-                    });
-                }
-            } catch (e) { console.warn('[Lorebook] getWorldInfoForText failed:', e); }
         }
 
         if (out.length === 0 && window.worldInfo?.searchByText) {
@@ -202,7 +274,6 @@ async function __buildLorebookAppendix(eventData, baseText) {
 
         if (out.length === 0) return '';
 
-        // Join and clamp to avoid runaway token usage
         const joined = out.join('\n\n');
         return joined.length > maxChars ? joined.slice(0, maxChars) : joined;
     } catch (e) {
@@ -210,13 +281,15 @@ async function __buildLorebookAppendix(eventData, baseText) {
         return '';
     }
 }
-
 // Replace existing definition with this version
+// Fix typo and const reassignment in appendBlockToAssistant
 function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
     const S = USER.tableBaseSetting || {};
-    const block = `<${blockLabel}>\n\`\`\`\n${content}\n\`\`\`\n</${blockLabel}>`;
-    if (blocklable === 'main') {
+    let block;
+    if (blockLabel === 'main') {
         block = `<${blockLabel}>\n\n${content}\n\n</${blockLabel}>`;
+    } else {
+        block = `<${blockLabel}>\n\`\`\`\n${content}\n\`\`\`\n</${blockLabel}>`;
     }
     const msg = USER.getContext().chat[msgIndex];
     const prev = msg.mes ?? msg.content ?? '';
@@ -227,7 +300,6 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
     const dom = document.querySelector(`.mes[mesid="${msgIndex}"] .mes_text`);
     if (dom) dom.innerHTML = updated;
 
-    // Keep RAG in sync (safe for all stages)
     if (S.enable_rag && window.ST_RAG?.purgeMessageEmbeddings && window.ST_RAG?.vectorizeMessageByIndex) {
         try {
             window.ST_RAG.purgeMessageEmbeddings(msgIndex);
@@ -235,7 +307,6 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
         } catch (e) { console.warn('[MultiStage] RAG update failed:', e); }
     }
 
-    // Only main stage is allowed to trigger tableEdit parsing
     if (opts.triggerTableEdit === true && S.isAiWriteTable && /<tableEdit>/.test(updated)) {
         try { handleEditStrInMessage(msg, msgIndex, true); } catch (e) { console.warn('[MultiStage] table edit parse failed:', e); }
     }
@@ -248,6 +319,10 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
 // No message history selection/filtering is used for LLM calls.
 // Update signature to accept eventData, and inject lorebook blocks into every stage prompt
 // Replace the existing __runIncrementalMultiStageResponse(stmBase) definition with:
+// PATCH: Augment narration stage with conditional world-info scan before showing to user.
+// If narration output contains any of <BEAT>, <MAJORE>, <MINORE>, <MOB>, <BOSS>,
+// run lorebook/world-info engine on (narrationPrompt + narrationResp), append result,
+// then proceed with normal narration stage steps.
 async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     const S = USER.tableBaseSetting || {};
     const narrationTpl = (S.narration_template || '').trim();
@@ -256,7 +331,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     const longTermSummaryTpl = (S.long_term_summary_template || '').trim();
     if (!narrationTpl || !mainTpl) return false;
 
-    const previousSummary = '';// getLongTermSummary();
+    const previousSummary = getLongTermSummary();
 
     const expand = (tpl, ctx) => tpl
         .replace(/{{narration}}/g, ctx.narration || '')
@@ -276,10 +351,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         return typeof raw === 'string' ? raw.trim() : '';
     }
 
-    // Build lorebook appendix once, reuse across stages
-    const loreAppendix = await __buildLorebookAppendix(eventData, stmBase);
-    const loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
-
+    
     // Prepare a new assistant message we'll build up stage-by-stage
     const ctx = USER.getContext();
     ctx.chat = ctx.chat || [];
@@ -293,27 +365,53 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     });
     const baseAssistantIndex = ctx.chat.length - 1;
 
-    // Stage 1: Narration
-    const narrationPrompt = [
-        stmBase,
-        loreBlock,
-        expand(narrationTpl, { previous_summary: previousSummary })
-    ].filter(Boolean).join('\n\n');
+    stmBase = stmBase.replace(/<BEAT>/g, '');
+    stmBase = stmBase.replace(/<SEX>/g, '');
 
-    const rawNarration = await callStage(narrationPrompt);
-    const { text: narrationResp } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
+    // Stage 1: Narration
+    narrationPrompt = [
+        stmBase,        
+        narrationTpl
+    ].filter(Boolean).join('\n\n');
+    narrationLoreSource = [narrationTpl, previousSummary].filter(Boolean).join('\n\n');
+    loreAppendix = await __buildLorebookAppendix(eventData, narrationLoreSource);
+    loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
+    narrationPrompt2 = [narrationPrompt, loreBlock].filter(Boolean).join('\n\n');
+    narrationPrompt2 = narrationPrompt2.replace(/<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+    
+    rawNarration = await callStage(narrationPrompt2);
+    let { text: narrationResp } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
+
+    //// NEW: If key tags are present, run world-info scan on (prompt + response) and append to narration before showing
+    //try {
+    //    const TAG_PATTERN = /<(BEAT|MAJORE|MINORE|MOB|BOSS|SEX)>/i;
+    //    if (TAG_PATTERN.test(narrationResp)) {
+    //        const scanSource = [narrationPrompt, narrationResp].join('\n');
+    //        loreAppendix = await __buildLorebookAppendix(eventData, scanSource);
+    //        loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
+    //        narrationPrompt2 = [narrationPrompt, loreBlock].filter(Boolean).join('\n\n');
+    //        rawNarration = await callStage(narrationPrompt2);
+    //        let { text: narrationResp } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
+    //    }
+    //} catch (e) {
+    //    console.warn('[Narration] World-info augmentation failed:', e);
+    //}
+
     appendBlockToAssistant(baseAssistantIndex, 'narration', narrationResp, { triggerTableEdit: false });
     try { await ctx.saveChat?.(); } catch { }
 
     // Stage 2: Thinking (optional)
     let thinkingResp = '';
     if (thinkingTpl) {
-        const thinkingPrompt = [
+        thinkingPrompt = [
             stmBase,
             loreBlock,
             `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
-            expand(thinkingTpl, { narration: narrationResp, previous_summary: previousSummary })
+            expand(thinkingTpl, { narration: narrationResp })
         ].filter(Boolean).join('\n\n');
+        thinkingPrompt = thinkingPrompt.replace(/<_beat>[\s\S]*?<\/_beat>/gi, '');
+        thinkingPrompt = thinkingPrompt.replace(/<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+        thinkingPrompt = thinkingPrompt.replace(/<_sex>[\s\S]*?<\/_sex>/gi, '');
 
         const rawThinking = await callStage(thinkingPrompt);
         const { text } = __sanitizeDeepSeekOutput(rawThinking, 'thinking');
@@ -323,14 +421,15 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     }
 
     // Stage 3: Main Response (last stage shown to the user; triggers tableEdit if present)
-    const mainPrompt = [
+    mainPrompt = [
         stmBase,
         loreBlock,
         `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
         thinkingResp ? `[THINKING START]\n${thinkingResp}\n[THINKING END]` : '',
-        expand(mainTpl, { narration: narrationResp, thinking: thinkingResp, previous_summary: previousSummary })
+        expand(mainTpl, { narration: narrationResp, thinking: thinkingResp})
     ].filter(Boolean).join('\n\n');
-
+    mainPrompt = mainPrompt.replace(/<_beat>[\s\S]*?<\/_beat>/gi, '');
+    
     const rawMain = await callStage(mainPrompt);
     const { text: mainResp } = __sanitizeDeepSeekOutput(rawMain, 'main');
     appendBlockToAssistant(baseAssistantIndex, 'main', mainResp, { triggerTableEdit: true });
@@ -338,7 +437,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
 
     // Stage 4: Long Term Summary (do NOT append to UI; update store only)
     if (longTermSummaryTpl) {
-        const summaryPrompt = [
+        summaryPrompt = [
             stmBase,
             loreBlock,
             `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
@@ -348,11 +447,12 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             expand(longTermSummaryTpl, {
                 narration: narrationResp,
                 thinking: thinkingResp,
-                main: __stripTableEditBlocks(mainResp),
-                previous_summary: previousSummary
+                main: __stripTableEditBlocks(mainResp)
             })
         ].filter(Boolean).join('\n\n');
-
+        summaryPrompt = summaryPrompt.replace(/<_beat>[\s\S]*?<\/_beat>/gi, '');
+        summaryPrompt = summaryPrompt.replace(/<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+        summaryPrompt = summaryPrompt.replace(/<_sex>[\s\S]*?<\/_sex>/gi, '');
         const rawSummary = await callStage(summaryPrompt);
         const { text: summaryResp } = __sanitizeDeepSeekOutput(rawSummary, 'main');
         updateLongTermSummary({
