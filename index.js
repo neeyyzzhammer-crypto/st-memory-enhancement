@@ -284,19 +284,20 @@ async function __buildLorebookAppendix(eventData, baseText) {
 }
 
 // Add near appendBlockToAssistant (new helper)
+// Replace previous helper
 function __createAssistantShellMessage() {
     const ctx = USER.getContext();
     const name2 = ctx?.name2 || 'Assistant';
     return {
-        is_user: false,
-        role: 'assistant',
         name: name2,
         mes: '',
-        content: '',
+        is_user: false,
+        is_system: false,
+        send_date: Date.now(),
+        force_avatar: ctx?.current_avatar || undefined,
         swipes: [''],
         swipe_id: 0,
-        extra: {},
-        ts: Date.now(),
+        extra: { gen_id: Date.now(), type: 'multi_stage' },
     };
 }
 // Hard cancel helper (set every flag ST checks in various builds)
@@ -323,33 +324,66 @@ function __renderMessageByIndex(idx) {
 }
 // Replace existing definition with this version
 // Fix typo and const reassignment in appendBlockToAssistant
+// Safer incremental block appender using ST events
 function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
+    const ctx = USER.getContext();
+    const { eventSource, event_types, messageFormatting } = ctx;
     const S = USER.tableBaseSetting || {};
-    let block;
-    if (blockLabel === 'main') {
-        block = `<${blockLabel}>\n\n${content}\n\n</${blockLabel}>`;
-    } else {
-        block = `<${blockLabel}>\n\`\`\`\n${content}\n\`\`\`\n</${blockLabel}>`;
-    }
-    const msg = USER.getContext().chat[msgIndex];
-    const prev = msg.mes ?? msg.content ?? '';
+
+    const msg = ctx.chat[msgIndex];
+    if (!msg) return;
+
+    // Build block
+    const block = (blockLabel === 'main')
+        ? `<${blockLabel}>\n\n${content}\n\n</${blockLabel}>`
+        : `<${blockLabel}>\n\`\`\`\n${content}\n\`\`\`\n</${blockLabel}>`;
+
+    // Append
+    const prev = msg.mes || '';
     const updated = prev ? (prev + '\n\n' + block) : block;
     msg.mes = updated;
-    msg.content = updated;
+    msg.swipes[msg.swipe_id] = updated;
 
-    const dom = document.querySelector(`.mes[mesid="${msgIndex}"] .mes_text`);
-    if (dom) dom.innerHTML = updated;
-
+    // Optional: re‑vectorize for RAG
     if (S.enable_rag && window.ST_RAG?.purgeMessageEmbeddings && window.ST_RAG?.vectorizeMessageByIndex) {
         try {
             window.ST_RAG.purgeMessageEmbeddings(msgIndex);
             window.ST_RAG.vectorizeMessageByIndex(msgIndex);
-        } catch (e) { console.warn('[MultiStage] RAG update failed:', e); }
+        } catch (e) {
+            console.warn('[MultiStage] RAG update failed:', e);
+        }
     }
 
+    // Table edit trigger
     if (opts.triggerTableEdit === true && S.isAiWriteTable && /<tableEdit>/.test(updated)) {
         try { handleEditStrInMessage(msg, msgIndex, true); } catch (e) { console.warn('[MultiStage] table edit parse failed:', e); }
     }
+
+    // Formatting pass (keeps sanitizer consistent)
+    if (typeof messageFormatting === 'function') {
+        try {
+            msg.formatted_mes = messageFormatting(
+                msg.mes,
+                msg.name,
+                !!msg.is_system,
+                !!msg.is_user,
+                msgIndex,
+                {},
+                false
+            );
+        } catch (e) {
+            console.warn('[MultiStage] messageFormatting failed:', e);
+        }
+    }
+
+    // Emit update + render events so UI refreshes
+    try {
+        eventSource.emit(event_types.MESSAGE_UPDATED, msgIndex);
+        eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, msgIndex);
+    } catch (e) {
+        console.warn('[MultiStage] Event emit failed:', e);
+    }
+
     updateSystemMessageTableStatus();
 }
 // ================= Incremental Multi‑Stage Generation (Narration -> Thinking -> Main) =================
@@ -389,6 +423,8 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         .replace(/{{summary}}/g, ctx.summary || '');
 
     const useMainAPI = S.use_main_api === true;
+    const ctx = USER.getContext();
+    const { addOneMessage, eventSource, event_types, saveChat } = ctx;
 
     async function callStage(payload) {
         const messages = [{ role: 'user', content: payload }];
@@ -399,17 +435,16 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         return typeof raw === 'string' ? raw.trim() : '';
     }
 
-    // Create assistant shell via schema-safe helper
-    const ctx = USER.getContext();
-    ctx.chat = ctx.chat || [];
-    ctx.chat.push(__createAssistantShellMessage());
+    // Create and render shell using official API
+    const shell = __createAssistantShellMessage();
+    ctx.chat.push(shell); // push first to keep indices consistent
+    addOneMessage(shell, { scroll: true });
     const baseAssistantIndex = ctx.chat.length - 1;
+    try {
+        eventSource.emit(event_types.MESSAGE_RECEIVED, baseAssistantIndex);
+        eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, baseAssistantIndex);
+    } catch { }
 
-    // Persist + render shell before appending any stage content
-    try { await ctx.saveChat?.(); } catch { }
-    __renderMessageByIndex(baseAssistantIndex);
-    // Allow DOM mount
-    await new Promise(r => setTimeout(r, 0));
 
     stmBase = stmBase.replace(/<BEAT>/g, '');
     stmBase = stmBase.replace(/<SEX>/g, '');
@@ -449,7 +484,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     //}
 
     appendBlockToAssistant(baseAssistantIndex, 'narration', narrationResp, { triggerTableEdit: false });
-    __renderMessageByIndex(baseAssistantIndex);
+    
 
 
     // Stage 2: Thinking (optional)
@@ -469,7 +504,6 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         const { text } = __sanitizeDeepSeekOutput(rawThinking, 'thinking');
         thinkingResp = text;
         appendBlockToAssistant(baseAssistantIndex, 'critical_thinking', thinkingResp, { triggerTableEdit: false });
-        __renderMessageByIndex(baseAssistantIndex);
 
     }
 
@@ -486,7 +520,6 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     const rawMain = await callStage(mainPrompt);
     const { text: mainResp } = __sanitizeDeepSeekOutput(rawMain, 'main');
     appendBlockToAssistant(baseAssistantIndex, 'main', mainResp, { triggerTableEdit: true });
-    __renderMessageByIndex(baseAssistantIndex);
 
 
     // Stage 4: Long Term Summary (do NOT append to UI; update store only)
@@ -518,7 +551,9 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         });        
     }
 
+    try { await saveChat?.(); } catch { }
     try { updateSheetsView(baseAssistantIndex); } catch { }
+
     return true;
 }
 // Build RAG "past events" text for current user message
