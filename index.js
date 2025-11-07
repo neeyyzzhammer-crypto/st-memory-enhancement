@@ -20,6 +20,7 @@ import { hideChatMessageRange } from '../../../chats.js'; // adjust path if root
 import './scripts/runtime/rag.js'; // ensure RAG runtime (listeners + window.ST_RAG) is loaded
 // PATCH: extend existing import from standaloneAPI to include request helpers
 import { ext_getAllTables, ext_exportAllTablesAsJson, handleMainAPIRequest, handleCustomAPIRequest } from './scripts/settings/standaloneAPI.js';
+import { getCurrentChatNames } from "./utils/chatNameExtractor.js";
 
 console.log("______________________记忆插件：开始加载______________________")
 
@@ -332,7 +333,15 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     if (!narrationTpl || !mainTpl) return false;
 
     const previousSummary = getLongTermSummary();
-
+    const { userName, charName } = getCurrentChatNames();
+    const __applyNameMacros = (s) => {
+        if (typeof s !== 'string') return s;
+        return s
+            .replace(/{{user}}/gi, userName)
+            .replace(/<user>/g, userName)
+            .replace(/{{char}}/gi, charName)
+            .replace(/{{character}}/gi, charName);
+    };
     const expand = (tpl, ctx) => tpl
         .replace(/{{narration}}/g, ctx.narration || '')
         .replace(/{{thinking}}/g, ctx.thinking || '')
@@ -374,11 +383,16 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         narrationTpl
     ].filter(Boolean).join('\n\n');
     let narrationLoreSource = [narrationTpl, previousSummary].filter(Boolean).join('\n\n');
+    narrationLoreSource = __applyNameMacros(narrationLoreSource);
+
     let loreAppendix = await __buildLorebookAppendix(eventData, narrationLoreSource);
     let loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
+    loreBlock = __applyNameMacros(loreBlock);
+
     let narrationPrompt2 = [narrationPrompt, loreBlock].filter(Boolean).join('\n\n');
     narrationPrompt2 = narrationPrompt2.replace(/<_sexd>[\s\S]*?<\/_sexd>/gi, '');
-    
+    narrationPrompt2 = __applyNameMacros(narrationPrompt2);
+
     const rawNarration = await callStage(narrationPrompt2);
     let { text: narrationResp } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
 
@@ -412,7 +426,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         thinkingPrompt = thinkingPrompt.replace(/<_beat>[\s\S]*?<\/_beat>/gi, '');
         thinkingPrompt = thinkingPrompt.replace(/<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         thinkingPrompt = thinkingPrompt.replace(/<_sex>[\s\S]*?<\/_sex>/gi, '');
-
+        thinkingPrompt = __applyNameMacros(thinkingPrompt);
         const rawThinking = await callStage(thinkingPrompt);
         const { text } = __sanitizeDeepSeekOutput(rawThinking, 'thinking');
         thinkingResp = text;
@@ -429,7 +443,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         expand(mainTpl, { narration: narrationResp, thinking: thinkingResp})
     ].filter(Boolean).join('\n\n');
     mainPrompt = mainPrompt.replace(/<_beat>[\s\S]*?<\/_beat>/gi, '');
-    
+    mainPrompt = __applyNameMacros(mainPrompt);
     const rawMain = await callStage(mainPrompt);
     const { text: mainResp } = __sanitizeDeepSeekOutput(rawMain, 'main');
     appendBlockToAssistant(baseAssistantIndex, 'main', mainResp, { triggerTableEdit: true });
@@ -453,6 +467,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         summaryPrompt = summaryPrompt.replace(/<_beat>[\s\S]*?<\/_beat>/gi, '');
         summaryPrompt = summaryPrompt.replace(/<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         summaryPrompt = summaryPrompt.replace(/<_sex>[\s\S]*?<\/_sex>/gi, '');
+        summaryPrompt = __applyNameMacros(summaryPrompt);
         const rawSummary = await callStage(summaryPrompt);
         const { text: summaryResp } = __sanitizeDeepSeekOutput(rawSummary, 'main');
         updateLongTermSummary({
