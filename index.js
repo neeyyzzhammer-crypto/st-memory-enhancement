@@ -1,7 +1,6 @@
 import { APP, BASE, DERIVED, EDITOR, SYSTEM, USER } from './core/manager.js';
 import { openTableRendererPopup, updateSystemMessageTableStatus } from "./scripts/renderer/tablePushToChat.js";
 import { loadSettings } from "./scripts/settings/userExtensionSetting.js";
-import { ext_getAllTables, ext_exportAllTablesAsJson } from './scripts/settings/standaloneAPI.js';
 import { openTableDebugLogPopup } from "./scripts/settings/devConsole.js";
 import { TableTwoStepSummary } from "./scripts/runtime/separateTableUpdate.js";
 import { initTest } from "./components/_fotTest.js";
@@ -163,7 +162,7 @@ async function __runIncrementalMultiStageResponse(stmBase) {
     const longTermSummaryTpl = (S.long_term_summary_template || '').trim(); // optional
     if (!narrationTpl || !mainTpl) return false;
 
-    const previousSummary = getLongTermSummary();
+    const previousSummary = '';// getLongTermSummary();
 
     const expand = (tpl, ctx) => tpl
         .replace(/{{narration}}/g, ctx.narration || '')
