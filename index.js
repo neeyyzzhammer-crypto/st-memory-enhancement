@@ -369,17 +369,17 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     stmBase = stmBase.replace(/<SEX>/g, '');
 
     // Stage 1: Narration
-    narrationPrompt = [
+    let narrationPrompt = [
         stmBase,        
         narrationTpl
     ].filter(Boolean).join('\n\n');
-    narrationLoreSource = [narrationTpl, previousSummary].filter(Boolean).join('\n\n');
-    loreAppendix = await __buildLorebookAppendix(eventData, narrationLoreSource);
-    loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
-    narrationPrompt2 = [narrationPrompt, loreBlock].filter(Boolean).join('\n\n');
+    let narrationLoreSource = [narrationTpl, previousSummary].filter(Boolean).join('\n\n');
+    let loreAppendix = await __buildLorebookAppendix(eventData, narrationLoreSource);
+    let loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
+    let narrationPrompt2 = [narrationPrompt, loreBlock].filter(Boolean).join('\n\n');
     narrationPrompt2 = narrationPrompt2.replace(/<_sexd>[\s\S]*?<\/_sexd>/gi, '');
     
-    rawNarration = await callStage(narrationPrompt2);
+    const rawNarration = await callStage(narrationPrompt2);
     let { text: narrationResp } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
 
     //// NEW: If key tags are present, run world-info scan on (prompt + response) and append to narration before showing
@@ -403,7 +403,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     // Stage 2: Thinking (optional)
     let thinkingResp = '';
     if (thinkingTpl) {
-        thinkingPrompt = [
+        let thinkingPrompt = [
             stmBase,
             loreBlock,
             `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
@@ -421,7 +421,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     }
 
     // Stage 3: Main Response (last stage shown to the user; triggers tableEdit if present)
-    mainPrompt = [
+    let mainPrompt = [
         stmBase,
         loreBlock,
         `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
@@ -437,7 +437,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
 
     // Stage 4: Long Term Summary (do NOT append to UI; update store only)
     if (longTermSummaryTpl) {
-        summaryPrompt = [
+        let summaryPrompt = [
             stmBase,
             loreBlock,
             `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
