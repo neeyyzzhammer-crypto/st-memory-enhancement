@@ -494,7 +494,19 @@ function __stm_abortDeferredDefaultLLM(reason = 'post_multistage_abort') {
         console.warn('[MultiStage Abort] Failed to abort deferred request:', e);
     }
 }
-
+// Add near __stm_raceWithAbort (utility)
+function __getCancellationHandleFallback(ch) {
+    if (ch) return ch;
+    const st = window.__stm_ms_state;
+    if (st?.controller) {
+        return {
+            type: 'abort',
+            signal: st.controller.signal,
+            cancel: () => { try { st.controller.abort(); } catch { } }
+        };
+    }
+    return null;
+}
 /* Utility: wraps a promise so it rejects immediately when controller/token aborts */
 function __stm_raceWithAbort(p, cancellationHandle) {
     if (!cancellationHandle) return p;
@@ -523,6 +535,8 @@ function __stm_raceWithAbort(p, cancellationHandle) {
     return p;
 }
 async function __runIncrementalMultiStageResponse(eventData, stmBase) {    
+    cancellationHandle = __getCancellationHandleFallback(cancellationHandle);
+
     const S = USER.tableBaseSetting || {};
     const narrationTpl = (S.narration_template || '').trim();
     const thinkingTpl = (S.thinking_template || '').trim();
