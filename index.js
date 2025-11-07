@@ -1617,7 +1617,7 @@ function getLatestAssistantCriticalThinkingSection() {
 // PATCH: enhance thinking data to support multi previous critical thinking sections (CRM setting)
 function initThinkingData(eventData) {
     try {
-        let tpl = '';// USER.tableBaseSetting?.thinking_template || '';
+        let tpl = '<previous_thinking>';// USER.tableBaseSetting?.thinking_template || '';
         //if (!tpl || typeof tpl !== 'string') return '';
         // Critical thinking memory (CRM) count
         const crmCount = parseInt(
