@@ -30,6 +30,56 @@ const editErrorInfo = {
     forgotCommentTag: false,
     functionNameError: false,
 };
+
+// === Multi-Stage Cancellation & Duplicate LLM Suppression ===
+window.__stm_ms_state = {
+    inProgress: false,
+    consumed: false,
+    controller: null,
+};
+
+function __stm_markConsumed() {
+    window.__stm_ms_state.inProgress = false;
+    window.__stm_ms_state.consumed = true;
+}
+
+function __stm_begin() {
+    window.__stm_ms_state.consumed = false;
+    window.__stm_ms_state.inProgress = true;
+    window.__stm_ms_state.controller = new AbortController();
+    return window.__stm_ms_state.controller;
+}
+
+window.stMemoryEnhancement = window.stMemoryEnhancement || {};
+window.stMemoryEnhancement.cancelMultiStage = function (reason = 'user_cancel') {
+    const st = window.__stm_ms_state;
+    if (st.inProgress && st.controller) {
+        try { st.controller.abort(); } catch { }
+        st.inProgress = false;
+        console.log('[MultiStage] Aborted multi-stage generation:', reason);
+    }
+};
+
+// Hard suppression hook invoked from prompt ready
+function __stm_shouldSuppressDefaultLLM() {
+    return window.__stm_ms_state && window.__stm_ms_state.consumed === true;
+}
+// Add near other small helpers (above onMessageReceived)
+function __normalizeMessageIndex(arg) {
+    if (Number.isFinite(arg)) return arg;
+    if (arg && typeof arg === 'object') {
+        if (Number.isFinite(arg.id)) return arg.id;
+        if (Number.isFinite(arg.index)) return arg.index;
+        if (arg.message) {
+            try {
+                const chat = USER.getContext()?.chat || [];
+                const idx = chat.indexOf(arg.message);
+                if (idx >= 0) return idx;
+            } catch { }
+        }
+    }
+    return -1;
+}
 // Helper: strip blocks we must not include in RAG text injection
 function __stripCriticalAndInfoBlocks(text) {
     if (typeof text !== 'string' || !text) return '';
@@ -406,14 +456,89 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
 
     updateSystemMessageTableStatus();
 }
-async function __runIncrementalMultiStageResponse(eventData, stmBase) {
+
+window.__stm_llm_deferral = {
+    tokenSource: null,
+    abortController: null,
+    pendingPromise: null,
+};
+
+function __stm_prepareCancellation() {
+    // Prefer VS Code LM CancellationTokenSource if available
+    if (window.vscode?.CancellationTokenSource) {
+        const cts = new window.vscode.CancellationTokenSource();
+        window.__stm_llm_deferral.tokenSource = cts;
+        return { type: 'vscode', token: cts.token, cancel: () => cts.cancel() };
+    }
+    const ac = new AbortController();
+    window.__stm_llm_deferral.abortController = ac;
+    return { type: 'abort', signal: ac.signal, cancel: () => { try { ac.abort(); } catch { } } };
+}
+
+function __stm_abortDeferredDefaultLLM(reason = 'post_multistage_abort') {
+    try {
+        const d = window.__stm_llm_deferral;
+        if (d.tokenSource) {
+            d.tokenSource.cancel();
+            console.log('[MultiStage Abort] VSCode tokenSource cancelled:', reason);
+        }
+        if (d.abortController) {
+            d.abortController.abort();
+            console.log('[MultiStage Abort] AbortController aborted:', reason);
+        }
+        if (d.pendingPromise && typeof d.pendingPromise.cancel === 'function') {
+            // In case underlying promise supports cancel (rare)
+            try { d.pendingPromise.cancel(); } catch { }
+        }
+    } catch (e) {
+        console.warn('[MultiStage Abort] Failed to abort deferred request:', e);
+    }
+}
+
+/* Utility: wraps a promise so it rejects immediately when controller/token aborts */
+function __stm_raceWithAbort(p, cancellationHandle) {
+    if (!cancellationHandle) return p;
+    if (cancellationHandle.type === 'abort' && cancellationHandle.signal) {
+        if (cancellationHandle.signal.aborted) {
+            return Promise.reject(new DOMException('Aborted', 'AbortError'));
+        }
+        const abortPromise = new Promise((_, reject) => {
+            cancellationHandle.signal.addEventListener('abort', () =>
+                reject(new DOMException('Aborted', 'AbortError')), { once: true }
+            );
+        });
+        return Promise.race([p, abortPromise]);
+    }
+    if (cancellationHandle.type === 'vscode' && cancellationHandle.token) {
+        if (cancellationHandle.token.isCancellationRequested) {
+            return Promise.reject(new Error('VSCodeCancellationError'));
+        }
+        const cancelPromise = new Promise((_, reject) => {
+            cancellationHandle.token.onCancellationRequested(() =>
+                reject(new Error('VSCodeCancellationError'))
+            );
+        });
+        return Promise.race([p, cancelPromise]);
+    }
+    return p;
+}
+async function __runIncrementalMultiStageResponse(eventData, stmBase) {    
     const S = USER.tableBaseSetting || {};
     const narrationTpl = (S.narration_template || '').trim();
     const thinkingTpl = (S.thinking_template || '').trim();
     const mainTpl = (S.main_response_template || '').trim();
     const longTermSummaryTpl = (S.long_term_summary_template || '').trim();
     if (!narrationTpl || !mainTpl) return false;
+    const checkAbort = () => {
+        if (cancellationHandle?.type === 'abort' && cancellationHandle.signal?.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
+        }
+        if (cancellationHandle?.type === 'vscode' && cancellationHandle.token?.isCancellationRequested) {
+            throw new Error('VSCodeCancellationError');
+        }
+    };
 
+    checkAbort();
     const previousSummary = getLongTermSummary();
     const { userName, charName } = getCurrentChatNames();
     const __applyNameMacros = (s) => {
@@ -437,33 +562,40 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
 
     // Stage caller with robust fallback: Custom -> Main
     async function callStage(payload) {
+        checkAbort();
         const messages = [{ role: 'user', content: payload }];
         const tryMain = async () => {
             try {
-                const raw = await handleMainAPIRequest(messages, null, true); // silent
+                checkAbort();
+                const raw = await __stm_raceWithAbort(handleMainAPIRequest(messages, null, true), cancellationHandle);
+                checkAbort();
                 return (raw === 'suspended' || typeof raw !== 'string') ? '' : raw.trim();
-            } catch {
+            } catch (e) {
+                if (e && (e.name === 'AbortError' || e.message === 'VSCodeCancellationError')) throw e;
                 return '';
             }
         };
         const tryCustom = async () => {
             try {
-                const raw = await handleCustomAPIRequest(messages, null, true, true); // step-by-step=true, silent=true
+                checkAbort();
+                const raw = await __stm_raceWithAbort(handleCustomAPIRequest(messages, null, true, true), cancellationHandle);
+                checkAbort();
                 return (raw === 'suspended' || typeof raw !== 'string') ? '' : raw.trim();
-            } catch {
+            } catch (e) {
+                if (e && (e.name === 'AbortError' || e.message === 'VSCodeCancellationError')) throw e;
                 return '';
             }
         };
-
+        let r = '';
         if (useMainAPI) {
-            let r = await tryMain();
+            r = await tryMain();
             if (!r) r = await tryCustom();
-            return r || '';
         } else {
-            let r = await tryCustom();
+            r = await tryCustom();
             if (!r) r = await tryMain();
-            return r || '';
         }
+        checkAbort();
+        return r || '';
     }
 
     // Create and render shell using official API
@@ -1362,12 +1494,34 @@ async function onChatCompletionPromptReady(eventData) {
         const canHandle = USER.tableBaseSetting.step_by_step !== true && hasAnyStage;
 
         if (canHandle) {
-            // Cancel default generation BEFORE any async work to avoid the extra call
             __cancelDefaultLLM(eventData);
             eventData.handledByMemoryEnhancement = true;
 
-            const handled = await __runIncrementalMultiStageResponse(eventData, stmBase);
-            // Even if handled=false, we keep default cancelled to prevent double LLM calls
+            // Start unified cancellation context
+            const cancellationHandle = __stm_prepareCancellation();
+            const msController = __stm_begin(); // keeps legacy flags + AbortController
+
+            // Multi-stage (abortable)
+            try {
+                await __runIncrementalMultiStageResponse(eventData, stmBase, cancellationHandle);
+            } catch (e) {
+                if (e && (e.name === 'AbortError' || e.message === 'VSCodeCancellationError')) {
+                    console.warn('[MultiStage] Aborted during processing.');
+                    appendBlockToAssistant(
+                        USER.getContext().chat.length - 1,
+                        'main',
+                        '(Generation aborted)',
+                        { triggerTableEdit: false }
+                    );
+                } else {
+                    console.error('[MultiStage] Unexpected error:', e);
+                }
+            } finally {
+                // Ensure any deferred default request is killed
+                __stm_abortDeferredDefaultLLM('after_multistage_complete');
+            }
+
+            __stm_markConsumed();
             return;
         }
 
@@ -1499,24 +1653,35 @@ async function onMessageEdited(this_edit_mes_id) {
 }
 
 
+// Replace the body of onMessageReceived with this normalized version
 async function onMessageReceived(chat_id) {
     if (USER.tableBaseSetting.isExtensionAble === false) return;
-    // RAG: vectorize this assistant message (source text from USER.getContext().chat[chat_id])
+
+    const idx = __normalizeMessageIndex(chat_id);
+    if (!Number.isFinite(idx) || idx < 0) return;
+
+    // RAG: vectorize this assistant message
     try {
         if (USER.tableBaseSetting.enable_rag && window.ST_RAG?.vectorizeMessageByIndex) {
-            await window.ST_RAG.vectorizeMessageByIndex(chat_id);
+            await window.ST_RAG.vectorizeMessageByIndex(idx);
         }
     } catch (e) {
         console.warn('[RAG] vectorize on assistant message failed:', e);
+    }
+
+    // Only process assistant messages with a string body
+    const chat = USER.getContext().chat[idx];
+    if (!chat || chat.is_user === true || typeof chat.mes !== 'string') {
+        updateSheetsView();
+        return;
     }
 
     if (USER.tableBaseSetting.step_by_step === true && USER.getContext().chat.length > 2) {
         TableTwoStepSummary("auto");
     } else {
         if (USER.tableBaseSetting.isAiWriteTable === false) return;
-        const chat = USER.getContext().chat[chat_id];
         try {
-            handleEditStrInMessage(chat);
+            handleEditStrInMessage(chat, idx);
         } catch (error) {
             EDITOR.error("记忆插件：表格自动更改失败\n原因：", error.message, error);
         }
