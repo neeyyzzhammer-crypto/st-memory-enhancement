@@ -282,6 +282,45 @@ async function __buildLorebookAppendix(eventData, baseText) {
         return '';
     }
 }
+
+// Add near appendBlockToAssistant (new helper)
+function __createAssistantShellMessage() {
+    const ctx = USER.getContext();
+    const name2 = ctx?.name2 || 'Assistant';
+    return {
+        is_user: false,
+        role: 'assistant',
+        name: name2,
+        mes: '',
+        content: '',
+        swipes: [''],
+        swipe_id: 0,
+        extra: {},
+        ts: Date.now(),
+    };
+}
+// Hard cancel helper (set every flag ST checks in various builds)
+function __cancelDefaultLLM(eventData) {
+    eventData.cancel = true;
+    eventData.skip = true;
+    eventData.abort = true;
+    eventData.preventDefault = true;
+    eventData.skipLLM = true;
+    eventData._consumedByMemoryEnhancement = true;
+}
+// Try to render a single message (SillyTavern internal compatibility)
+function __renderMessageByIndex(idx) {
+    // Newer builds expose renderMessage / renderSingleMessage
+    if (typeof window.renderMessage === 'function') {
+        try { window.renderMessage(idx); return true; } catch { }
+    }
+    if (typeof window.renderSingleMessage === 'function') {
+        try { window.renderSingleMessage(idx); return true; } catch { }
+    }
+    // Fallback: full chat refresh
+    try { APP?.eventSource?.emit?.(APP.event_types.CHAT_CHANGED); return true; } catch { }
+    return false;
+}
 // Replace existing definition with this version
 // Fix typo and const reassignment in appendBlockToAssistant
 function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
@@ -360,24 +399,18 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         return typeof raw === 'string' ? raw.trim() : '';
     }
 
-    
-    // Prepare a new assistant message we'll build up stage-by-stage
+    // Create assistant shell via schema-safe helper
     const ctx = USER.getContext();
     ctx.chat = ctx.chat || [];
-    ctx.chat.push({
-        is_user: false,
-        role: 'assistant',
-        name: (ctx.name2 || 'Assistant'),
-        mes: '',
-        content: '',
-        ts: Date.now()
-    });
+    ctx.chat.push(__createAssistantShellMessage());
     const baseAssistantIndex = ctx.chat.length - 1;
-    // NEW: persist and force UI to mount the new message node before appending blocks
+
+    // Persist + render shell before appending any stage content
     try { await ctx.saveChat?.(); } catch { }
-    try { APP?.eventSource?.emit?.(APP.event_types.CHAT_CHANGED); } catch { }
-    // Yield to let the DOM create .mes[mesid="${baseAssistantIndex}"]
+    __renderMessageByIndex(baseAssistantIndex);
+    // Allow DOM mount
     await new Promise(r => setTimeout(r, 0));
+
     stmBase = stmBase.replace(/<BEAT>/g, '');
     stmBase = stmBase.replace(/<SEX>/g, '');
 
@@ -416,7 +449,8 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     //}
 
     appendBlockToAssistant(baseAssistantIndex, 'narration', narrationResp, { triggerTableEdit: false });
-    try { await ctx.saveChat?.(); } catch { }
+    __renderMessageByIndex(baseAssistantIndex);
+
 
     // Stage 2: Thinking (optional)
     let thinkingResp = '';
@@ -435,7 +469,8 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         const { text } = __sanitizeDeepSeekOutput(rawThinking, 'thinking');
         thinkingResp = text;
         appendBlockToAssistant(baseAssistantIndex, 'critical_thinking', thinkingResp, { triggerTableEdit: false });
-        try { await ctx.saveChat?.(); } catch { }
+        __renderMessageByIndex(baseAssistantIndex);
+
     }
 
     // Stage 3: Main Response (last stage shown to the user; triggers tableEdit if present)
@@ -451,7 +486,8 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     const rawMain = await callStage(mainPrompt);
     const { text: mainResp } = __sanitizeDeepSeekOutput(rawMain, 'main');
     appendBlockToAssistant(baseAssistantIndex, 'main', mainResp, { triggerTableEdit: true });
-    try { await ctx.saveChat?.(); } catch { }
+    __renderMessageByIndex(baseAssistantIndex);
+
 
     // Stage 4: Long Term Summary (do NOT append to UI; update store only)
     if (longTermSummaryTpl) {
@@ -479,8 +515,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             thinking: thinkingResp,
             main: mainResp,
             summary: summaryResp
-        });
-        try { await ctx.saveChat?.(); } catch { }
+        });        
     }
 
     try { updateSheetsView(baseAssistantIndex); } catch { }
