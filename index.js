@@ -617,10 +617,10 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase, cancellati
     addOneMessage(shell, { scroll: true });
     const baseAssistantIndex = ctx.chat.length - 1;
     try {
-        const shellPayload = { id: baseAssistantIndex, message: ctx.chat[baseAssistantIndex] };
-        eventSource.emit(event_types.MESSAGE_SENT, shellPayload);
-        eventSource.emit(event_types.MESSAGE_RECEIVED, shellPayload);
-        eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, shellPayload);
+        // Emit a "sent/received" pair so renderers that depend on these update correctly
+        eventSource.emit(event_types.MESSAGE_SENT, baseAssistantIndex);
+        eventSource.emit(event_types.MESSAGE_RECEIVED, baseAssistantIndex);
+        eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, baseAssistantIndex);
     } catch { }
 
 
