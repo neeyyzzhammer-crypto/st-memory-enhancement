@@ -871,6 +871,10 @@ export function loadSettings() {
     if (typeof USER.tableBaseSetting.critical_thinking_memory !== 'number') {
         USER.tableBaseSetting.critical_thinking_memory = 1;
     }
+    // NEW default for reasoning retention flag
+    if (typeof USER.tableBaseSetting.keep_reasoning_in_stmBase !== 'boolean') {
+        USER.tableBaseSetting.keep_reasoning_in_stmBase = false;
+    }
     if (typeof USER.tableBaseSetting.rag_top_k !== 'number') {
         USER.tableBaseSetting.rag_top_k = 3;   // NEW
     }

@@ -155,10 +155,7 @@ function getLongTermSummary() {
     // 1) Prefer the last assistant message carrying a long_term_summary
     const lastMsgSummary = __getLastMessageLongTermSummary();
     if (lastMsgSummary) return lastMsgSummary;
-
-    // 2) Fallback to branch store for backward compatibility
-    const branchId = __getActiveBranchId();
-    return __getBranchData(branchId).summary || '';
+    return '';
 }
 
 function updateLongTermSummary({ narration, thinking, main, summary }) {

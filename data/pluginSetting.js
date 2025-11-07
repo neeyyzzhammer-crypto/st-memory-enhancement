@@ -63,6 +63,7 @@ export async function filterTableDataPopup(originalData, title, warning) {
     waitingRegister.deep = '#table_init_injection';
     waitingRegister.message_template = '#table_init_injection';
     waitingRegister.thinking_template = '#table_init_injection';
+    waitingRegister.keep_reasoning_in_stmBase = '#table_init_injection'; // NEW
 
     waitingRegister.enable_rag = '#table_init_injection';
     waitingRegister.rag_similarity = '#table_init_injection';
@@ -131,6 +132,7 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
     // NEW: Short-term memory message window (number of recent messages kept in prompt)
     short_term_memory: 2,
     critical_thinking_memory: 1,          // NEW: how many past <critical_thinking> sections to include separately
+    keep_reasoning_in_stmBase: false, // NEW: keep <critical_thinking> blocks inside stmBase if true
     enable_rag: false,
     rag_similarity: 0.25,
     rag_top_k: 3,       // NEW
