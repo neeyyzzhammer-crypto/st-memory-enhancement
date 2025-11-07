@@ -1258,17 +1258,14 @@ async function onChatCompletionPromptReady(eventData) {
 
         // Derive stmBase (FULL raw prompt to feed multi-stage):
         // Priority: augmented last user message; else concatenation of inserted system/user messages.
-        let stmBase = '';
-        if (lastUserIdx !== -1) {
-            stmBase = eventData.chat[lastUserIdx].content || '';
-        } else if (insertedIndices.length) {
-            stmBase = insertedIndices
-                .map(i => eventData.chat[i]?.content || '')
-                .filter(s => s.trim()).join('\n\n');
-        } else {
-            // Fallback: use merged pieces even if not injected (should be rare)
-            stmBase = [thinkingContent, promptContent].filter(s => s && s.trim()).join('\n\n');
-        }
+        let stmBase = eventData.chat
+            .map(m => {
+                const v = typeof m?.content === 'string' ? m.content
+                    : (typeof m?.mes === 'string' ? m.mes : '');
+                return typeof v === 'string' && v.length > 0 ? v : '';
+            })
+            .filter(v => v !== '')
+            .join('\n');
 
         // MULTI-STAGE: consume the finalized stmBase; do NOT touch eventData.chat history.
         if ((USER.tableBaseSetting.narration_template || '').trim() &&
