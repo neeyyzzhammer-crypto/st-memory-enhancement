@@ -51,10 +51,10 @@ function __stm_begin() {
 }
 
 window.stMemoryEnhancement = window.stMemoryEnhancement || {};
-window.stMemoryEnhancement.cancelMultiStage = function (reason = 'user_cancel') {
+window.stMemoryEnhancement.cancelMultiStage = function(reason = 'user_cancel') {
     const st = window.__stm_ms_state;
     if (st.inProgress && st.controller) {
-        try { st.controller.abort(); } catch { }
+        try { st.controller.abort(); } catch {}
         st.inProgress = false;
         console.log('[MultiStage] Aborted multi-stage generation:', reason);
     }
@@ -341,7 +341,6 @@ function __createAssistantShellMessage() {
     return {
         name: name2,
         mes: '',
-        content: '',            // ADDED: alias used by older handlers (e.g. translateMessageEdit)
         is_user: false,
         is_system: false,
         send_date: Date.now(),
@@ -373,17 +372,6 @@ function __renderMessageByIndex(idx) {
     try { APP?.eventSource?.emit?.(APP.event_types.CHAT_CHANGED); return true; } catch { }
     return false;
 }
-
-// Compatibility: emit only object payloads (numeric-only payload was breaking listeners
-// that assume an object and access .is_system). Older listeners still work because
-// they can read payload.id / payload.message.
-function __emitMessageLifecycle(eventSource, event_types, idx, msg) {
-    const payload = { id: idx, message: msg };
-    try { eventSource.emit(event_types.MESSAGE_UPDATED, payload); } catch { }
-    try { eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, payload); } catch { }
-    // STREAM_TOKEN_RECEIVED already emits an object elsewhere
-}
-
 function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
     const ctx = USER.getContext();
     const { eventSource, event_types, messageFormatting } = ctx;
@@ -392,21 +380,24 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
     const msg = ctx.chat[msgIndex];
     if (!msg) return;
 
+    // Build block
     const block = (blockLabel === 'main')
         ? `<${blockLabel}>\n\n${content}\n\n</${blockLabel}>`
         : `<${blockLabel}>\n\`\`\`\n${content}\n\`\`\`\n</${blockLabel}>`;
 
+    // Append
     const prev = msg.mes || '';
     const updated = prev ? (prev + '\n\n' + block) : block;
     msg.mes = updated;
-    msg.content = updated;                 // ADDED: keep content in sync for legacy consumers
     msg.swipes = Array.isArray(msg.swipes) ? msg.swipes : [''];
     msg.swipe_id = typeof msg.swipe_id === 'number' ? msg.swipe_id : 0;
     msg.swipes[msg.swipe_id] = updated;
 
+    // Keep display_text in sync for builds that use it for rendering
     msg.extra = msg.extra || {};
     msg.extra.display_text = msg.mes;
 
+    // Optional: re‑vectorize for RAG
     if (S.enable_rag && window.ST_RAG?.purgeMessageEmbeddings && window.ST_RAG?.vectorizeMessageByIndex) {
         try {
             window.ST_RAG.purgeMessageEmbeddings(msgIndex);
@@ -416,10 +407,12 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
         }
     }
 
+    // Table edit trigger
     if (opts.triggerTableEdit === true && S.isAiWriteTable && /<tableEdit>/.test(updated)) {
         try { handleEditStrInMessage(msg, msgIndex, true); } catch (e) { console.warn('[MultiStage] table edit parse failed:', e); }
     }
 
+    // Formatting pass (keeps sanitizer consistent)
     if (typeof messageFormatting === 'function') {
         try {
             msg.formatted_mes = messageFormatting(
@@ -436,19 +429,26 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
         }
     }
 
+    // Best-effort streaming-like event (safe-wrapped)
     try {
         if (event_types?.STREAM_TOKEN_RECEIVED) {
             eventSource.emit(event_types.STREAM_TOKEN_RECEIVED, {
                 id: msgIndex,
-                text: block,
+                text: block,              // delta-ish content
                 state: { reasoning: null, image: null },
             });
         }
-    } catch { }
+    } catch (e) {
+        // ignore
+    }
 
-    // REPLACED: only emit object payloads (removed raw index emissions)
-    __emitMessageLifecycle(eventSource, event_types, msgIndex, msg);
+    // Emit update events (both index and payload variants to satisfy different builds)
+    try { eventSource.emit(event_types.MESSAGE_UPDATED, msgIndex); } catch { }
+    try { eventSource.emit(event_types.MESSAGE_UPDATED, { id: msgIndex, message: msg }); } catch { }
+    try { eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, msgIndex); } catch { }
+    try { eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, { id: msgIndex, message: msg }); } catch { }
 
+    // Hard refresh fallback if events aren’t enough
     const rendered = __renderMessageByIndex(msgIndex);
     if (!rendered) {
         try { APP?.eventSource?.emit?.(APP.event_types.CHAT_CHANGED); } catch { }
@@ -456,102 +456,14 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
 
     updateSystemMessageTableStatus();
 }
-window.__stm_llm_deferral = {
-    tokenSource: null,
-    abortController: null,
-    pendingPromise: null,
-};
-
-function __stm_prepareCancellation() {
-    // Prefer VS Code LM CancellationTokenSource if available
-    if (window.vscode?.CancellationTokenSource) {
-        const cts = new window.vscode.CancellationTokenSource();
-        window.__stm_llm_deferral.tokenSource = cts;
-        return { type: 'vscode', token: cts.token, cancel: () => cts.cancel() };
-    }
-    const ac = new AbortController();
-    window.__stm_llm_deferral.abortController = ac;
-    return { type: 'abort', signal: ac.signal, cancel: () => { try { ac.abort(); } catch { } } };
-}
-
-function __stm_abortDeferredDefaultLLM(reason = 'post_multistage_abort') {
-    try {
-        const d = window.__stm_llm_deferral;
-        if (d.tokenSource) {
-            d.tokenSource.cancel();
-            console.log('[MultiStage Abort] VSCode tokenSource cancelled:', reason);
-        }
-        if (d.abortController) {
-            d.abortController.abort();
-            console.log('[MultiStage Abort] AbortController aborted:', reason);
-        }
-        if (d.pendingPromise && typeof d.pendingPromise.cancel === 'function') {
-            // In case underlying promise supports cancel (rare)
-            try { d.pendingPromise.cancel(); } catch { }
-        }
-    } catch (e) {
-        console.warn('[MultiStage Abort] Failed to abort deferred request:', e);
-    }
-}
-// Add near __stm_raceWithAbort (utility)
-function __getCancellationHandleFallback(ch) {
-    if (ch) return ch;
-    const st = window.__stm_ms_state;
-    if (st?.controller) {
-        return {
-            type: 'abort',
-            signal: st.controller.signal,
-            cancel: () => { try { st.controller.abort(); } catch { } }
-        };
-    }
-    return null;
-}
-/* Utility: wraps a promise so it rejects immediately when controller/token aborts */
-function __stm_raceWithAbort(p, cancellationHandle) {
-    if (!cancellationHandle) return p;
-    if (cancellationHandle.type === 'abort' && cancellationHandle.signal) {
-        if (cancellationHandle.signal.aborted) {
-            return Promise.reject(new DOMException('Aborted', 'AbortError'));
-        }
-        const abortPromise = new Promise((_, reject) => {
-            cancellationHandle.signal.addEventListener('abort', () =>
-                reject(new DOMException('Aborted', 'AbortError')), { once: true }
-            );
-        });
-        return Promise.race([p, abortPromise]);
-    }
-    if (cancellationHandle.type === 'vscode' && cancellationHandle.token) {
-        if (cancellationHandle.token.isCancellationRequested) {
-            return Promise.reject(new Error('VSCodeCancellationError'));
-        }
-        const cancelPromise = new Promise((_, reject) => {
-            cancellationHandle.token.onCancellationRequested(() =>
-                reject(new Error('VSCodeCancellationError'))
-            );
-        });
-        return Promise.race([p, cancelPromise]);
-    }
-    return p;
-}
-async function __runIncrementalMultiStageResponse(eventData, stmBase, cancellationHandle) {    
-    cancellationHandle = __getCancellationHandleFallback(cancellationHandle);
-
+async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     const S = USER.tableBaseSetting || {};
     const narrationTpl = (S.narration_template || '').trim();
     const thinkingTpl = (S.thinking_template || '').trim();
     const mainTpl = (S.main_response_template || '').trim();
     const longTermSummaryTpl = (S.long_term_summary_template || '').trim();
     if (!narrationTpl || !mainTpl) return false;
-    const checkAbort = () => {
-        if (cancellationHandle?.type === 'abort' && cancellationHandle.signal?.aborted) {
-            throw new DOMException('Aborted', 'AbortError');
-        }
-        if (cancellationHandle?.type === 'vscode' && cancellationHandle.token?.isCancellationRequested) {
-            throw new Error('VSCodeCancellationError');
-        }
-    };
 
-    checkAbort();
     const previousSummary = getLongTermSummary();
     const { userName, charName } = getCurrentChatNames();
     const __applyNameMacros = (s) => {
@@ -575,47 +487,40 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase, cancellati
 
     // Stage caller with robust fallback: Custom -> Main
     async function callStage(payload) {
-        checkAbort();
         const messages = [{ role: 'user', content: payload }];
         const tryMain = async () => {
             try {
-                checkAbort();
-                const raw = await __stm_raceWithAbort(handleMainAPIRequest(messages, null, true), cancellationHandle);
-                checkAbort();
+                const raw = await handleMainAPIRequest(messages, null, true); // silent
                 return (raw === 'suspended' || typeof raw !== 'string') ? '' : raw.trim();
-            } catch (e) {
-                if (e && (e.name === 'AbortError' || e.message === 'VSCodeCancellationError')) throw e;
+            } catch {
                 return '';
             }
         };
         const tryCustom = async () => {
             try {
-                checkAbort();
-                const raw = await __stm_raceWithAbort(handleCustomAPIRequest(messages, null, true, true), cancellationHandle);
-                checkAbort();
+                const raw = await handleCustomAPIRequest(messages, null, true, true); // step-by-step=true, silent=true
                 return (raw === 'suspended' || typeof raw !== 'string') ? '' : raw.trim();
-            } catch (e) {
-                if (e && (e.name === 'AbortError' || e.message === 'VSCodeCancellationError')) throw e;
+            } catch {
                 return '';
             }
         };
-        let r = '';
+
         if (useMainAPI) {
-            r = await tryMain();
+            let r = await tryMain();
             if (!r) r = await tryCustom();
+            return r || '';
         } else {
-            r = await tryCustom();
+            let r = await tryCustom();
             if (!r) r = await tryMain();
+            return r || '';
         }
-        checkAbort();
-        return r || '';
     }
 
     // Create and render shell using official API
     const shell = __createAssistantShellMessage();
     ctx.chat.push(shell); // keep index in sync with chat
     addOneMessage(shell, { scroll: true });
-    const baseAssistantIndex = ctx.chat.length - 1;//
+    const baseAssistantIndex = ctx.chat.length - 1;
     try {
         // Emit a "sent/received" pair so renderers that depend on these update correctly
         eventSource.emit(event_types.MESSAGE_SENT, baseAssistantIndex);
@@ -1507,34 +1412,12 @@ async function onChatCompletionPromptReady(eventData) {
         const canHandle = USER.tableBaseSetting.step_by_step !== true && hasAnyStage;
 
         if (canHandle) {
+            // Cancel default generation BEFORE any async work to avoid the extra call
             __cancelDefaultLLM(eventData);
             eventData.handledByMemoryEnhancement = true;
 
-            // Start unified cancellation context
-            const cancellationHandle = __stm_prepareCancellation();
-            const msController = __stm_begin(); // keeps legacy flags + AbortController
-
-            // Multi-stage (abortable)
-            try {
-                await __runIncrementalMultiStageResponse(eventData, stmBase, cancellationHandle);
-            } catch (e) {
-                if (e && (e.name === 'AbortError' || e.message === 'VSCodeCancellationError')) {
-                    console.warn('[MultiStage] Aborted during processing.');
-                    appendBlockToAssistant(
-                        USER.getContext().chat.length - 1,
-                        'main',
-                        '(Generation aborted)',
-                        { triggerTableEdit: false }
-                    );
-                } else {
-                    console.error('[MultiStage] Unexpected error:', e);
-                }
-            } finally {
-                // Ensure any deferred default request is killed
-                __stm_abortDeferredDefaultLLM('after_multistage_complete');
-            }
-
-            __stm_markConsumed();
+            const handled = await __runIncrementalMultiStageResponse(eventData, stmBase);
+            // Even if handled=false, we keep default cancelled to prevent double LLM calls
             return;
         }
 
