@@ -69,7 +69,11 @@ function __sanitizeDeepSeekOutput(raw, stage /* 'narration' | 'thinking' | 'main
 }
 // === NEW: Long-term summary branch store ==============================
 const LT_SUMMARY_STORE_KEY = 'long_term_summary_store_v1';
-
+// Helper: strip any <tableEdit>...</tableEdit> blocks (used by summary stage to avoid duplicate rows)
+function __stripTableEditBlocks(text) {
+    if (typeof text !== 'string') return text;
+    return text.replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, '');
+}
 function __getSummaryStore() {
     const ctx = USER.getContext();
     ctx.chatMetadata = ctx.chatMetadata || {};
@@ -117,25 +121,49 @@ function updateLongTermSummary({ narration, thinking, main, summary }) {
     });
     try { USER.getContext().saveChat?.(); } catch { }
 }
+
+
+// Replace existing definition with this version
+function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
+    const S = USER.tableBaseSetting || {};
+    const block = `<${blockLabel}>\n\`\`\`\n${content}\n\`\`\`\n</${blockLabel}>`;
+    const msg = USER.getContext().chat[msgIndex];
+    const prev = msg.mes ?? msg.content ?? '';
+    const updated = prev ? (prev + '\n\n' + block) : block;
+    msg.mes = updated;
+    msg.content = updated;
+
+    const dom = document.querySelector(`.mes[mesid="${msgIndex}"] .mes_text`);
+    if (dom) dom.innerHTML = updated;
+
+    // Keep RAG in sync (safe for all stages)
+    if (S.enable_rag && window.ST_RAG?.purgeMessageEmbeddings && window.ST_RAG?.vectorizeMessageByIndex) {
+        try {
+            window.ST_RAG.purgeMessageEmbeddings(msgIndex);
+            window.ST_RAG.vectorizeMessageByIndex(msgIndex);
+        } catch (e) { console.warn('[MultiStage] RAG update failed:', e); }
+    }
+
+    // Only main stage is allowed to trigger tableEdit parsing
+    if (opts.triggerTableEdit === true && S.isAiWriteTable && /<tableEdit>/.test(updated)) {
+        try { handleEditStrInMessage(msg, msgIndex, true); } catch (e) { console.warn('[MultiStage] table edit parse failed:', e); }
+    }
+    updateSystemMessageTableStatus();
+}
 // ================= Incremental Multi‑Stage Generation (Narration -> Thinking -> Main) =================
-// This runs BEFORE any legacy injection. It:
-// 1. Sends base chat (pre-injection) + narration_template to LLM, displays <narration> block immediately.
-// 2. Sends base chat + narration + thinking_template, appends <critical_thinking> block to same message.
-// 3. Sends base chat + narration + thinking + main_response_template, appends <main> block.
-// Placeholders supported: {{tableData}}, {{long_term_memory}}, {{narration}}, {{thinking}}
-// ================= Incremental Multi‑Stage Generation (Narration -> Thinking -> Main)
-// Sanitized for DeepSeek reasoning, based on STM-trimmed eventData and message_template =================
-// ================= Incremental Multi‑Stage Generation (Narration -> Thinking -> Main -> LongTermSummary)
-// Sanitized for DeepSeek reasoning, based on STM-trimmed eventData and message_template + persistent long-term summary
-async function __runIncrementalMultiStageResponse(eventData, preamble /* message_template expanded */) {
+// Replace existing definition with this version
+// Incremental Multi‑Stage Generation (Narration -> Thinking -> Main -> LongTermSummary)
+// Strictly uses STM pipeline output (message_template-expanded string) as the base.
+// No message history selection/filtering is used for LLM calls.
+async function __runIncrementalMultiStageResponse(stmBase) {
     const S = USER.tableBaseSetting || {};
     const narrationTpl = (S.narration_template || '').trim();
     const thinkingTpl = (S.thinking_template || '').trim(); // optional
     const mainTpl = (S.main_response_template || '').trim();
-    const longTermSummaryTpl = (S.long_term_summary_template || '').trim(); // NEW final stage
-    if (!narrationTpl || !mainTpl) return false; // need at least narration + main
+    const longTermSummaryTpl = (S.long_term_summary_template || '').trim(); // optional
+    if (!narrationTpl || !mainTpl) return false;
 
-    const previousSummary = getLongTermSummary(); // previous branch summary (may be empty)
+    const previousSummary = getLongTermSummary();
 
     const expand = (tpl, ctx) => tpl
         .replace(/{{narration}}/g, ctx.narration || '')
@@ -146,16 +174,8 @@ async function __runIncrementalMultiStageResponse(eventData, preamble /* message
 
     const useMainAPI = S.use_main_api === true;
 
-    // Use already STM-trimmed chat history directly
-    const baseMessages = (eventData.chat || [])
-        .map(m => ({
-            role: m.role || (m.is_user ? 'user' : 'assistant'),
-            content: (m.content || m.mes || '').toString()
-        }))
-        .filter(m => m.content);
-
-    async function callStage(promptContent) {
-        const messages = [...baseMessages, { role: 'user', content: promptContent }];
+    async function callStage(payload) {
+        const messages = [{ role: 'user', content: payload }];
         let raw;
         if (useMainAPI) raw = await handleMainAPIRequest(messages, null, true);
         else raw = await handleCustomAPIRequest(messages, null, true, true);
@@ -163,36 +183,7 @@ async function __runIncrementalMultiStageResponse(eventData, preamble /* message
         return typeof raw === 'string' ? raw.trim() : '';
     }
 
-    function appendBlockToAssistant(msgIndex, blockLabel, content) {
-        const block = `<${blockLabel}>\n\`\`\`\n${content}\n\`\`\`\n</${blockLabel}>`;
-        const msg = USER.getContext().chat[msgIndex];
-        const prev = msg.mes ?? msg.content ?? '';
-        const updated = prev ? (prev + '\n\n' + block) : block;
-        msg.mes = updated;
-        msg.content = updated;
-
-        const dom = document.querySelector(`.mes[mesid="${msgIndex}"] .mes_text`);
-        if (dom) dom.innerHTML = updated;
-
-        if (S.enable_rag && window.ST_RAG?.purgeMessageEmbeddings && window.ST_RAG?.vectorizeMessageByIndex) {
-            try {
-                window.ST_RAG.purgeMessageEmbeddings(msgIndex);
-                window.ST_RAG.vectorizeMessageByIndex(msgIndex);
-            } catch (e) { console.warn('[MultiStage] RAG update failed:', e); }
-        }
-
-        if (S.isAiWriteTable && /<tableEdit>/.test(updated)) {
-            try { handleEditStrInMessage(msg, msgIndex, true); } catch (e) { console.warn('[MultiStage] table edit parse failed:', e); }
-        }
-        updateSystemMessageTableStatus();
-    }
-
-    // Stage 1: Narration
-    const narrationPrompt = [preamble, expand(narrationTpl, { previous_summary: previousSummary })]
-        .filter(Boolean).join('\n\n');
-    const rawNarration = await callStage(narrationPrompt);
-    const { text: narrationResp } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
-
+    // Prepare a new assistant message we'll build up stage-by-stage
     const ctx = USER.getContext();
     ctx.chat = ctx.chat || [];
     ctx.chat.push({
@@ -204,64 +195,66 @@ async function __runIncrementalMultiStageResponse(eventData, preamble /* message
         ts: Date.now()
     });
     const baseAssistantIndex = ctx.chat.length - 1;
-    appendBlockToAssistant(baseAssistantIndex, 'narration', narrationResp);
+
+    // Stage 1: Narration
+    const narrationPrompt = [
+        stmBase,
+        expand(narrationTpl, { previous_summary: previousSummary })
+    ].filter(Boolean).join('\n\n');
+
+    const rawNarration = await callStage(narrationPrompt);
+    const { text: narrationResp } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
+    appendBlockToAssistant(baseAssistantIndex, 'narration', narrationResp, { triggerTableEdit: false });
     try { await ctx.saveChat?.(); } catch { }
 
     // Stage 2: Thinking (optional)
     let thinkingResp = '';
     if (thinkingTpl) {
         const thinkingPrompt = [
-            preamble,
+            stmBase,
             `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
-            expand(thinkingTpl, {
-                narration: narrationResp,
-                previous_summary: previousSummary
-            })
+            expand(thinkingTpl, { narration: narrationResp, previous_summary: previousSummary })
         ].filter(Boolean).join('\n\n');
 
         const rawThinking = await callStage(thinkingPrompt);
         const { text } = __sanitizeDeepSeekOutput(rawThinking, 'thinking');
         thinkingResp = text;
-        appendBlockToAssistant(baseAssistantIndex, 'critical_thinking', thinkingResp);
+        appendBlockToAssistant(baseAssistantIndex, 'critical_thinking', thinkingResp, { triggerTableEdit: false });
         try { await ctx.saveChat?.(); } catch { }
     }
 
-    // Stage 3: Main Response
+    // Stage 3: Main Response (last stage shown to the user; triggers tableEdit if present)
     const mainPrompt = [
-        preamble,
+        stmBase,
         `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
         thinkingResp ? `[THINKING START]\n${thinkingResp}\n[THINKING END]` : '',
-        expand(mainTpl, {
-            narration: narrationResp,
-            thinking: thinkingResp,
-            previous_summary: previousSummary
-        })
+        expand(mainTpl, { narration: narrationResp, thinking: thinkingResp, previous_summary: previousSummary })
     ].filter(Boolean).join('\n\n');
 
     const rawMain = await callStage(mainPrompt);
     const { text: mainResp } = __sanitizeDeepSeekOutput(rawMain, 'main');
-    appendBlockToAssistant(baseAssistantIndex, 'main', mainResp);
+    appendBlockToAssistant(baseAssistantIndex, 'main', mainResp, { triggerTableEdit: true });
     try { await ctx.saveChat?.(); } catch { }
 
-    // Stage 4: Long Term Summary (if template provided)
+    // Stage 4: Long Term Summary (do NOT append to UI; update store only)
     if (longTermSummaryTpl) {
         const summaryPrompt = [
-            preamble,
+            stmBase,
             `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
             `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
             thinkingResp ? `[THINKING START]\n${thinkingResp}\n[THINKING END]` : '',
-            `[MAIN START]\n${mainResp}\n[MAIN END]`,
+            // Exclude <tableEdit> ... </tableEdit> to avoid duplicating rows in data store
+            `[MAIN START]\n${__stripTableEditBlocks(mainResp)}\n[MAIN END]`,
             expand(longTermSummaryTpl, {
                 narration: narrationResp,
                 thinking: thinkingResp,
-                main: mainResp,
+                main: __stripTableEditBlocks(mainResp),
                 previous_summary: previousSummary
             })
         ].filter(Boolean).join('\n\n');
 
         const rawSummary = await callStage(summaryPrompt);
-        const { text: summaryResp } = __sanitizeDeepSeekOutput(rawSummary, 'main'); // treat as final product (strip reasoning)
-        //appendBlockToAssistant(baseAssistantIndex, 'long_term_summary', summaryResp);
+        const { text: summaryResp } = __sanitizeDeepSeekOutput(rawSummary, 'main');
         updateLongTermSummary({
             narration: narrationResp,
             thinking: thinkingResp,
@@ -949,7 +942,8 @@ function __buildThinkingPromptOverride(latestSection) {
 // 4) build message_template preamble via initTableDataWithRag(eventData)
 // 5) run multi-stage response (sanitized) and early-return
 // 6) fallback to legacy injection when multi-stage not active
-// REWRITE onChatCompletionPromptReady (replace existing function definition)
+// PATCH: Reorder logic so STM pipeline (thinking + template injection) runs FIRST.
+// Multi-stage now receives the full, already-injected "raw prompt" (stmBase).
 async function onChatCompletionPromptReady(eventData) {
     try {
         if (eventData.dryRun === true ||
@@ -959,7 +953,7 @@ async function onChatCompletionPromptReady(eventData) {
             return;
         }
 
-        // RAG for latest user (still useful for memory table export even if we now use summary)
+        // Refresh RAG embedding for latest user message (non-destructive)
         try {
             if (USER.tableBaseSetting.enable_rag && window.ST_RAG?.vectorizeMessageByIndex) {
                 const chatArr = USER.getContext()?.chat || [];
@@ -972,7 +966,7 @@ async function onChatCompletionPromptReady(eventData) {
             console.warn('[RAG] vectorize on prompt-ready failed:', e);
         }
 
-        // Short-term memory trimming
+        // Short-term memory config (needed for STM assembly)
         const stm = parseInt(
             USER.tableBaseSetting?.short_term_memory ??
             $('#dataTable_short_term_memory').val() ??
@@ -980,70 +974,40 @@ async function onChatCompletionPromptReady(eventData) {
             10
         ) || 0;
 
-        if (stm === 0) {
-            let lastUserIdx = -1;
-            for (let i = eventData.chat.length - 1; i >= 0; i--) {
-                if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
-            }
-            if (lastUserIdx !== -1) {
-                eventData.chat = [eventData.chat[lastUserIdx]];
-            } else {
-                eventData.chat = eventData.chat.length ? [eventData.chat[eventData.chat.length - 1]] : [];
-            }
-        } else if (stm >= 0) {
-            const total = eventData.chat.length;
-            const keepCount = Math.min(total, stm * 2);
-            eventData.chat = eventData.chat.slice(total - keepCount);
-        }
+        // Build components of STM pipeline
+        const promptContent = await initTableDataWithRag(eventData); // processed message_template (tableData + long_term_memory)
+        const thinkingContent = '';// initThinkingData(eventData);         // thinking_template with previous critical thinking memory
 
-        // Build message_template preamble AFTER STM trimming (now includes stored long term summary instead of RAG)
-        const preamble = await initTableDataWithRag(eventData);
-
-        // Multi-stage pipeline (narration -> thinking -> main -> summary)
-        if ((USER.tableBaseSetting.narration_template || '').trim() &&
-            (USER.tableBaseSetting.main_response_template || '').trim() &&
-            USER.tableBaseSetting.step_by_step !== true) {
-
-            const handled = await __runIncrementalMultiStageResponse(eventData, preamble);
-            if (handled) return;
-        }
-
-        // Fallback legacy (step-by-step or no multi-stage templates)
-        if (USER.tableBaseSetting.step_by_step === true) {
-            if (USER.tableBaseSetting.injection_mode !== "injection_off") {
-                const tableData = getTablePrompt(eventData, true);
-                if (tableData) {
-                    const finalPrompt =
-                        `以下是通过表格记录的当前场景信息以及历史记录信息，你需要以此为参考进行思考：\n${tableData}`;
-                    if (USER.tableBaseSetting.deep === 0) {
-                        eventData.chat.push({ role: getMesRole(), content: finalPrompt });
-                    } else {
-                        eventData.chat.splice(-USER.tableBaseSetting.deep, 0, { role: getMesRole(), content: finalPrompt });
-                    }
-                }
-            }
-            return;
-        }
-
-        // Legacy injection (thinking + preamble) if multi-stage disabled
-        const thinkingContent = initThinkingData(eventData);
-        const promptContent = preamble;
         const role = getMesRole();
-
         let lastUserIdx = -1;
         for (let i = eventData.chat.length - 1; i >= 0; i--) {
             if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
         }
 
+        // Apply original STM injection logic to eventData.chat (this constructs the "raw prompt")
+        let insertedIndices = [];
         if (stm === 0) {
-            const merged = [thinkingContent, promptContent]
-                .filter(s => typeof s === 'string' && s.trim().length > 0)
-                .join('\n\n');
-            if (merged && lastUserIdx !== -1) {
-                const prev = eventData.chat[lastUserIdx].content || '';
-                eventData.chat[lastUserIdx].content = `${merged}\n\n${prev}`;
+            // Collapse context to a single (augmented) last user message
+            if (lastUserIdx !== -1) {
+                const merged = [thinkingContent, promptContent]
+                    .filter(s => typeof s === 'string' && s.trim().length > 0)
+                    .join('\n\n');
+                if (merged) {
+                    const prev = eventData.chat[lastUserIdx].content || '';
+                    eventData.chat[lastUserIdx].content = `${merged}\n\n${prev}`;
+                }
+                // For stmBase we use this augmented user message only
+            } else if (promptContent || thinkingContent) {
+                // No user message present, inject as a standalone role block
+                const standalone = [thinkingContent, promptContent]
+                    .filter(s => s && s.trim()).join('\n\n');
+                if (standalone) {
+                    eventData.chat.push({ role, content: standalone });
+                    insertedIndices.push(eventData.chat.length - 1);
+                }
             }
         } else {
+            // Keep a window (legacy behavior) but still prepend injection to latest user or insert near tail
             const hasThinking = thinkingContent && thinkingContent.trim();
             const hasPrompt = promptContent && promptContent.trim();
             if (lastUserIdx !== -1 && (hasThinking || hasPrompt)) {
@@ -1061,14 +1025,51 @@ async function onChatCompletionPromptReady(eventData) {
                     ? Math.max(eventData.chat.length - 1, 0)
                     : Math.max(eventData.chat.length - deepVal, 0);
                 eventData.chat.splice(insertAt, 0, ...inserts);
+                for (let k = 0; k < inserts.length; k++) insertedIndices.push(insertAt + k);
+            }
+
+            // Trim visible slice for sending (previous code trimmed eventData.chat itself).
+            const total = eventData.chat.length;
+            const keepCount = Math.min(total, stm * 2);
+            if (stm >= 0 && keepCount < total) {
+                eventData.chat = eventData.chat.slice(total - keepCount);
+                // Adjust lastUserIdx after slice
+                lastUserIdx = -1;
+                for (let i = eventData.chat.length - 1; i >= 0; i--) {
+                    if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
+                }
             }
         }
 
+        // Derive stmBase (FULL raw prompt to feed multi-stage):
+        // Priority: augmented last user message; else concatenation of inserted system/user messages.
+        let stmBase = '';
+        if (lastUserIdx !== -1) {
+            stmBase = eventData.chat[lastUserIdx].content || '';
+        } else if (insertedIndices.length) {
+            stmBase = insertedIndices
+                .map(i => eventData.chat[i]?.content || '')
+                .filter(s => s.trim()).join('\n\n');
+        } else {
+            // Fallback: use merged pieces even if not injected (should be rare)
+            stmBase = [thinkingContent, promptContent].filter(s => s && s.trim()).join('\n\n');
+        }
+
+        // MULTI-STAGE: consume the finalized stmBase; do NOT touch eventData.chat history.
+        if ((USER.tableBaseSetting.narration_template || '').trim() &&
+            (USER.tableBaseSetting.main_response_template || '').trim() &&
+            USER.tableBaseSetting.step_by_step !== true) {
+            const handled = await __runIncrementalMultiStageResponse(stmBase);
+            if (handled) return;
+        }
+
+        // Fallback (legacy single-shot path) if multi-stage disabled or not configured.
+        // Nothing further needed: STM already injected. We just update sheets view.
         updateSheetsView();
     } catch (error) {
         EDITOR.error(`记忆插件：表格数据注入失败\n原因：`, error.message, error);
     }
-    console.log("注入（STM优先）+ 多阶段或旧逻辑注入完成", eventData.chat);
+    console.log("STM 完成并作为基底，后续多阶段或旧逻辑处理完成", eventData.chat);
 }
 /**
  * 宏获取提示词
