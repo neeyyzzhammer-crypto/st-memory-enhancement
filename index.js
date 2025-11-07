@@ -256,7 +256,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     const longTermSummaryTpl = (S.long_term_summary_template || '').trim();
     if (!narrationTpl || !mainTpl) return false;
 
-    const previousSummary = getLongTermSummary();
+    const previousSummary = '';// getLongTermSummary();
 
     const expand = (tpl, ctx) => tpl
         .replace(/{{narration}}/g, ctx.narration || '')
