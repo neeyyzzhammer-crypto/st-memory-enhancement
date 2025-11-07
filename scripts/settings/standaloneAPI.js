@@ -126,21 +126,20 @@ async function createLoadingToast(isUseMainAPI = true, isSilent = false) {
  * @param {boolean} [isSilent=false] - 是否以静默模式运行，不显示加载提示
  * @returns {Promise<string>} 生成的响应内容
  */
+
 export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = false) {
     let finalSystemPrompt = '';
     let finalUserPrompt = '';
-    let suspended = false; // Define suspended outside the blocks
+    let suspended = false;
 
     if (Array.isArray(systemPrompt)) {
-        // --- Start: Processing for array input ---
-        const messages = systemPrompt; // messages is defined here now
+        const messages = systemPrompt;
 
-        // Loading toast logic
+        // UI toast
         createLoadingToast(true, isSilent).then((r) => {
             if (loadingToast) loadingToast.close();
-            suspended = r; // Assign to the outer suspended variable
+            suspended = r;
         });
-
         let startTime = Date.now();
         if (loadingToast) {
             loadingToast.frameUpdate(() => {
@@ -150,27 +149,56 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
             });
         }
 
-        console.log('主API请求的多消息数组:', messages); // Log the actual array
-        // Use TavernHelper.generateRaw with the array, enabling streaming
+        // Preferred path: use TavernHelper when present
+        if (typeof window !== 'undefined' && window.TavernHelper?.generateRaw) {
+            const response = await window.TavernHelper.generateRaw({
+                ordered_prompts: messages,
+                should_stream: true,
+            });
+            loadingToast?.close();
+            return suspended ? 'suspended' : response;
+        }
 
-        if(!TavernHelper) throw new Error("酒馆助手未安装，总结功能依赖于酒馆助手插件，请安装后刷新");
+        // Fallbacks (no TavernHelper):
+        // 1) Single-message array (multistage uses this): call EDITOR.generateRaw directly
+        if (messages.length === 1 && typeof messages[0]?.content === 'string') {
+            const response = await EDITOR.generateRaw(
+                messages[0].content,
+                '',
+                false,
+                false,
+                '' // no system prompt in this path
+            );
+            loadingToast?.close();
+            return suspended ? 'suspended' : response;
+        }
 
-        const response = await TavernHelper.generateRaw({
-            ordered_prompts: messages, // Pass the array directly
-            should_stream: true,      // Re-enable streaming
-        });
-        loadingToast.close();
+        // 2) Multi-message array: flatten into one prompt and call EDITOR.generateRaw
+        const flattened = messages
+            .map(m => {
+                const role = m?.role ?? 'user';
+                const content = typeof m?.content === 'string' ? m.content : '';
+                return `[${role.toUpperCase()}]\n${content}`;
+            })
+            .join('\n\n');
+        const response = await EDITOR.generateRaw(
+            flattened,
+            '',
+            false,
+            false,
+            '' // no system prompt in this path
+        );
+        loadingToast?.close();
         return suspended ? 'suspended' : response;
-        // --- End: Processing for array input ---
 
-    } else { // Correctly placed ELSE block
-        // --- Start: Original logic for non-array input ---
+    } else {
+        // Original string-based path
         finalSystemPrompt = systemPrompt;
         finalUserPrompt = userPrompt;
 
         createLoadingToast(true, isSilent).then((r) => {
             if (loadingToast) loadingToast.close();
-            suspended = r; // Assign to the outer suspended variable
+            suspended = r;
         });
 
         let startTime = Date.now();
@@ -182,7 +210,6 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
             });
         }
 
-        // Use EDITOR.generateRaw for non-array input
         const response = await EDITOR.generateRaw(
             finalUserPrompt,
             '',
@@ -190,11 +217,79 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
             false,
             finalSystemPrompt,
         );
-        loadingToast.close();
+        loadingToast?.close();
         return suspended ? 'suspended' : response;
-        // --- End: Original logic ---
     }
-} // Correct closing brace for the function
+}
+//export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = false) {
+//    let finalSystemPrompt = '';
+//    let finalUserPrompt = '';
+//    let suspended = false; // Define suspended outside the blocks
+
+//    if (Array.isArray(systemPrompt)) {
+//        // --- Start: Processing for array input ---
+//        const messages = systemPrompt; // messages is defined here now
+
+//        // Loading toast logic
+//        createLoadingToast(true, isSilent).then((r) => {
+//            if (loadingToast) loadingToast.close();
+//            suspended = r; // Assign to the outer suspended variable
+//        });
+
+//        let startTime = Date.now();
+//        if (loadingToast) {
+//            loadingToast.frameUpdate(() => {
+//                if (loadingToast) {
+//                    loadingToast.text = `正在使用【主API】(多消息)重新生成完整表格: ${((Date.now() - startTime) / 1000).toFixed(1)}秒`;
+//                }
+//            });
+//        }
+
+//        console.log('主API请求的多消息数组:', messages); // Log the actual array
+//        // Use TavernHelper.generateRaw with the array, enabling streaming
+
+//        if(!TavernHelper) throw new Error("酒馆助手未安装，总结功能依赖于酒馆助手插件，请安装后刷新");
+
+//        const response = await TavernHelper.generateRaw({
+//            ordered_prompts: messages, // Pass the array directly
+//            should_stream: true,      // Re-enable streaming
+//        });
+//        loadingToast.close();
+//        return suspended ? 'suspended' : response;
+//        // --- End: Processing for array input ---
+
+//    } else { // Correctly placed ELSE block
+//        // --- Start: Original logic for non-array input ---
+//        finalSystemPrompt = systemPrompt;
+//        finalUserPrompt = userPrompt;
+
+//        createLoadingToast(true, isSilent).then((r) => {
+//            if (loadingToast) loadingToast.close();
+//            suspended = r; // Assign to the outer suspended variable
+//        });
+
+//        let startTime = Date.now();
+//        if (loadingToast) {
+//            loadingToast.frameUpdate(() => {
+//                if (loadingToast) {
+//                    loadingToast.text = `正在使用【主API】重新生成完整表格: ${((Date.now() - startTime) / 1000).toFixed(1)}秒`;
+//                }
+//            });
+//        }
+
+//        // Use EDITOR.generateRaw for non-array input
+//        const response = await EDITOR.generateRaw(
+//            finalUserPrompt,
+//            '',
+//            false,
+//            false,
+//            finalSystemPrompt,
+//        );
+//        loadingToast.close();
+//        return suspended ? 'suspended' : response;
+//        // --- End: Original logic ---
+//    }
+//} // Correct closing brace for the function
 
 /**
  * 处理 API 测试请求，包括获取输入、解密密钥、调用测试函数和返回结果。
