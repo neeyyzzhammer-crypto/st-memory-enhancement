@@ -146,7 +146,37 @@ function __getActiveBranchId() {
         return 'default_branch';
     }
 }
+function __getLastUserMessageIndex() {
+    try {
+        const chat = USER.getContext()?.chat || [];
+        for (let i = chat.length - 1; i >= 0; i--) {
+            if (chat[i]?.is_user === true) return i;
+        }
+    } catch {}
+    return -1;
+}
 
+function __recomputeLatestSummaryFromChat() {
+    try {
+        const branchId = __getActiveBranchId();
+        const data = __getBranchData(branchId);
+        const chat = USER.getContext()?.chat || [];
+        for (let i = chat.length - 1; i >= 0; i--) {
+            const m = chat[i];
+            const s = m?.extra?.lt_summary;
+            if (typeof s === 'string' && s.trim()) {
+                data.summary = s;
+                try { USER.getContext().saveChat?.(); } catch {}
+                return;
+            }
+        }
+        // nothing left carrying a summary
+        data.summary = '';
+        try { USER.getContext().saveChat?.(); } catch {}
+    } catch (e) {
+        console.warn('[LongTermSummary] recompute from chat failed:', e);
+    }
+}
 function __getBranchData(branchId) {
     const store = __getSummaryStore();
     store.branches[branchId] = store.branches[branchId] || { summary: '', history: [] };
@@ -158,17 +188,47 @@ function getLongTermSummary() {
     return __getBranchData(branchId).summary || '';
 }
 
-function updateLongTermSummary({ narration, thinking, main, summary }) {
+function updateLongTermSummary({ narration, thinking, main, summary, userMessage, assistantIndex }) {
     const branchId = __getActiveBranchId();
     const data = __getBranchData(branchId);
-    data.summary = summary;
+    const latest = (typeof summary === 'string') ? summary : '';
+
+    // Persist "current latest"
+    data.summary = latest;
+
+    // Append full record to history
     data.history.push({
         ts: Date.now(),
-        narration,
-        thinking,
-        main,
-        summary
+        userMessage: (typeof userMessage === 'string') ? userMessage : '',
+        narration: narration || '',
+        thinking: thinking || '',
+        main: main || '',
+        summary: latest,
     });
+
+    // Also store alongside the messages to survive deletions
+    try {
+        const ctx = USER.getContext();
+        const chat = ctx?.chat || [];
+
+        // Attach to last user message
+        const userIdx = __getLastUserMessageIndex();
+        if (userIdx !== -1 && chat[userIdx]) {
+            chat[userIdx].extra = chat[userIdx].extra || {};
+            chat[userIdx].extra.lt_summary = latest;
+            chat[userIdx].extra.lt_summary_ts = Date.now();
+        }
+
+        // Attach to the assistant message we just created (if provided)
+        if (Number.isFinite(assistantIndex) && chat[assistantIndex]) {
+            chat[assistantIndex].extra = chat[assistantIndex].extra || {};
+            chat[assistantIndex].extra.lt_summary = latest;
+            chat[assistantIndex].extra.lt_summary_ts = Date.now();
+        }
+    } catch (e) {
+        console.warn('[LongTermSummary] attach to messages failed:', e);
+    }
+
     try { USER.getContext().saveChat?.(); } catch { }
 }
 // NEW: High-level Lorebook engine caller (tries ST's native world-info builders first)
@@ -684,6 +744,8 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
 
     // Stage 4: Long Term Summary (do NOT append to UI; update store only)
     if (longTermSummaryTpl) {
+        const lastUserMessage = __getLastUserMessageText(eventData);
+
         let summaryPrompt = [
             stmBase,
             loreBlock,
@@ -707,8 +769,10 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             narration: narrationResp,
             thinking: thinkingResp,
             main: mainResp,
-            summary: summaryResp
-        });        
+            summary: summaryResp,
+            userMessage: lastUserMessage,
+            assistantIndex: baseAssistantIndex
+        });
     }
 
     try { await saveChat?.(); } catch { }
@@ -1416,79 +1480,79 @@ async function onChatCompletionPromptReady(eventData) {
         }
 
         // Short-term memory config (needed for STM assembly)
-        const stm = parseInt(
-            USER.tableBaseSetting?.short_term_memory ??
-            $('#dataTable_short_term_memory').val() ??
-            '0',
-            10
-        ) || 0;
+        //const stm = parseInt(
+        //    USER.tableBaseSetting?.short_term_memory ??
+        //    $('#dataTable_short_term_memory').val() ??
+        //    '0',
+        //    10
+        //) || 0;
 
         // Build components of STM pipeline
         const promptContent = await initTableDataWithRag(eventData); // processed message_template (tableData + long_term_memory)
-        const thinkingContent = initThinkingData(eventData);         // thinking_template with previous critical thinking memory
+        //const thinkingContent = initThinkingData(eventData);         // thinking_template with previous critical thinking memory
 
-        const role = getMesRole();
-        let lastUserIdx = -1;
-        for (let i = eventData.chat.length - 1; i >= 0; i--) {
-            if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
-        }
+        //const role = getMesRole();
+        //let lastUserIdx = -1;
+        //for (let i = eventData.chat.length - 1; i >= 0; i--) {
+        //    if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
+        //}
 
-        // Apply original STM injection logic to eventData.chat (this constructs the "raw prompt")
-        let insertedIndices = [];
-        if (stm === 0) {
-            // Collapse context to a single (augmented) last user message
-            if (lastUserIdx !== -1) {
-                const merged = [thinkingContent, promptContent]
-                    .filter(s => typeof s === 'string' && s.trim().length > 0)
-                    .join('\n\n');
-                if (merged) {
-                    const prev = eventData.chat[lastUserIdx].content || '';
-                    eventData.chat[lastUserIdx].content = `${merged}\n\n${prev}`;
-                }
-                // For stmBase we use this augmented user message only
-            } else if (promptContent || thinkingContent) {
-                // No user message present, inject as a standalone role block
-                const standalone = [thinkingContent, promptContent]
-                    .filter(s => s && s.trim()).join('\n\n');
-                if (standalone) {
-                    eventData.chat.push({ role, content: standalone });
-                    insertedIndices.push(eventData.chat.length - 1);
-                }
-            }
-        } else {
-            // Keep a window (legacy behavior) but still prepend injection to latest user or insert near tail
-            const hasThinking = thinkingContent && thinkingContent.trim();
-            const hasPrompt = promptContent && promptContent.trim();
-            if (lastUserIdx !== -1 && (hasThinking || hasPrompt)) {
-                const prev = eventData.chat[lastUserIdx].content || '';
-                const parts = [];
-                if (hasThinking) parts.push(thinkingContent);
-                if (hasPrompt) parts.push(promptContent);
-                eventData.chat[lastUserIdx].content = `${parts.join('\n\n')}\n\n${prev}`;
-            } else if (hasThinking || hasPrompt) {
-                const inserts = [];
-                if (hasThinking) inserts.push({ role, content: thinkingContent });
-                if (hasPrompt) inserts.push({ role, content: promptContent });
-                const deepVal = Number.isFinite(USER.tableBaseSetting.deep) ? USER.tableBaseSetting.deep : 1;
-                const insertAt = (deepVal <= 0)
-                    ? Math.max(eventData.chat.length - 1, 0)
-                    : Math.max(eventData.chat.length - deepVal, 0);
-                eventData.chat.splice(insertAt, 0, ...inserts);
-                for (let k = 0; k < inserts.length; k++) insertedIndices.push(insertAt + k);
-            }
+        //// Apply original STM injection logic to eventData.chat (this constructs the "raw prompt")
+        //let insertedIndices = [];
+        //if (stm === 0) {
+        //    // Collapse context to a single (augmented) last user message
+        //    if (lastUserIdx !== -1) {
+        //        const merged = [thinkingContent, promptContent]
+        //            .filter(s => typeof s === 'string' && s.trim().length > 0)
+        //            .join('\n\n');
+        //        if (merged) {
+        //            const prev = eventData.chat[lastUserIdx].content || '';
+        //            eventData.chat[lastUserIdx].content = `${merged}\n\n${prev}`;
+        //        }
+        //        // For stmBase we use this augmented user message only
+        //    } else if (promptContent || thinkingContent) {
+        //        // No user message present, inject as a standalone role block
+        //        const standalone = [thinkingContent, promptContent]
+        //            .filter(s => s && s.trim()).join('\n\n');
+        //        if (standalone) {
+        //            eventData.chat.push({ role, content: standalone });
+        //            insertedIndices.push(eventData.chat.length - 1);
+        //        }
+        //    }
+        //} else {
+        //    // Keep a window (legacy behavior) but still prepend injection to latest user or insert near tail
+        //    const hasThinking = thinkingContent && thinkingContent.trim();
+        //    const hasPrompt = promptContent && promptContent.trim();
+        //    if (lastUserIdx !== -1 && (hasThinking || hasPrompt)) {
+        //        const prev = eventData.chat[lastUserIdx].content || '';
+        //        const parts = [];
+        //        if (hasThinking) parts.push(thinkingContent);
+        //        if (hasPrompt) parts.push(promptContent);
+        //        eventData.chat[lastUserIdx].content = `${parts.join('\n\n')}\n\n${prev}`;
+        //    } else if (hasThinking || hasPrompt) {
+        //        const inserts = [];
+        //        if (hasThinking) inserts.push({ role, content: thinkingContent });
+        //        if (hasPrompt) inserts.push({ role, content: promptContent });
+        //        const deepVal = Number.isFinite(USER.tableBaseSetting.deep) ? USER.tableBaseSetting.deep : 1;
+        //        const insertAt = (deepVal <= 0)
+        //            ? Math.max(eventData.chat.length - 1, 0)
+        //            : Math.max(eventData.chat.length - deepVal, 0);
+        //        eventData.chat.splice(insertAt, 0, ...inserts);
+        //        for (let k = 0; k < inserts.length; k++) insertedIndices.push(insertAt + k);
+        //    }
 
-            // Trim visible slice for sending (previous code trimmed eventData.chat itself).
-            const total = eventData.chat.length;
-            const keepCount = Math.min(total, stm * 2);
-            if (stm >= 0 && keepCount < total) {
-                eventData.chat = eventData.chat.slice(total - keepCount);
-                // Adjust lastUserIdx after slice
-                lastUserIdx = -1;
-                for (let i = eventData.chat.length - 1; i >= 0; i--) {
-                    if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
-                }
-            }
-        }
+        //    // Trim visible slice for sending (previous code trimmed eventData.chat itself).
+        //    const total = eventData.chat.length;
+        //    const keepCount = Math.min(total, stm * 2);
+        //    if (stm >= 0 && keepCount < total) {
+        //        eventData.chat = eventData.chat.slice(total - keepCount);
+        //        // Adjust lastUserIdx after slice
+        //        lastUserIdx = -1;
+        //        for (let i = eventData.chat.length - 1; i >= 0; i--) {
+        //            if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
+        //        }
+        //    }
+        //}
 
         // Derive stmBase (FULL raw prompt to feed multi-stage):
         // Priority: augmented last user message; else concatenation of inserted system/user messages.
@@ -1497,7 +1561,7 @@ async function onChatCompletionPromptReady(eventData) {
                 return JSON.stringify(m)
             })            
             .join('\n');
-
+        stmBase = [stmBase, promptContent].join('\n\n');
         // Decide early if we will take over generation (and cancel default LLM immediately)
         const hasAnyStage = ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
             ((USER.tableBaseSetting.main_response_template || '').trim().length > 0);
@@ -1761,6 +1825,11 @@ async function onMessageDeleted(chat_id) {
 
     // Keep previous behavior
     await onChatChanged();
+
+    // NEW: recompute the latest long term summary from remaining messages
+    try { __recomputeLatestSummaryFromChat(); } catch (e) {
+        console.warn('[LongTermSummary] recompute on delete failed:', e);
+    }
 }
 
 /**
