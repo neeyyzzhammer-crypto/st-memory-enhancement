@@ -120,7 +120,96 @@ function updateLongTermSummary({ narration, thinking, main, summary }) {
     });
     try { USER.getContext().saveChat?.(); } catch { }
 }
+// Add near other helpers (e.g., after __buildPastEventsFromRag)
+async function __buildLorebookAppendix(eventData, baseText) {
+    try {
+        const S = USER.tableBaseSetting || {};
+        if (S.enable_lorebook_stages !== true) return '';
 
+        // Select query source
+        let queryText = '';
+        if ((S.lorebook_query_source || 'last_user') === 'stm') {
+            queryText = typeof baseText === 'string' ? baseText : '';
+        } else {
+            // last user content from current event data
+            if (eventData && Array.isArray(eventData.chat)) {
+                for (let i = eventData.chat.length - 1; i >= 0; i--) {
+                    const m = eventData.chat[i];
+                    if (m?.role === 'user' && typeof m.content === 'string' && m.content.trim()) {
+                        queryText = m.content;
+                        break;
+                    }
+                }
+            }
+            if (!queryText) queryText = typeof baseText === 'string' ? baseText : '';
+        }
+        if (!queryText) return '';
+
+        const minScore = (typeof S.lorebook_min_score === 'number') ? S.lorebook_min_score : 0.25;
+        const topK = Number.isFinite(S.lorebook_top_k) ? S.lorebook_top_k : 5;
+        const maxChars = Number.isFinite(S.lorebook_max_chars) ? S.lorebook_max_chars : 4000;
+
+        const out = [];
+        const push = (t) => {
+            if (!t || typeof t !== 'string') return;
+            const v = t.trim();
+            if (!v) return;
+            if (!out.includes(v)) out.push(v);
+        };
+
+        // 1) Preferred: dedicated lore search adapter (if provided by another extension)
+        if (window.ST_LORE?.searchSimilarByText) {
+            try {
+                const results = await window.ST_LORE.searchSimilarByText(queryText, minScore, topK);
+                if (Array.isArray(results)) {
+                    results.forEach(r => {
+                        if (r && typeof r.text === 'string') push(r.text);
+                        else if (typeof r === 'string') push(r);
+                    });
+                }
+            } catch (e) { console.warn('[Lorebook] ST_LORE.searchSimilarByText failed:', e); }
+        }
+
+        // 2) Common SillyTavern world info helpers (names vary by ST version/build)
+        if (out.length === 0 && typeof window.getWorldInfoForText === 'function') {
+            try {
+                const entries = await window.getWorldInfoForText(queryText);
+                if (Array.isArray(entries)) {
+                    entries.forEach(e => {
+                        push(e?.content || e?.value || e?.text || '');
+                    });
+                }
+            } catch (e) { console.warn('[Lorebook] getWorldInfoForText failed:', e); }
+        }
+
+        if (out.length === 0 && window.worldInfo?.searchByText) {
+            try {
+                const entries = await window.worldInfo.searchByText(queryText, { topK, minScore });
+                if (Array.isArray(entries)) {
+                    entries.forEach(e => push(e?.text || e?.content || e?.value || ''));
+                }
+            } catch (e) { console.warn('[Lorebook] worldInfo.searchByText failed:', e); }
+        }
+
+        if (out.length === 0 && window.Lorebook?.query) {
+            try {
+                const entries = await window.Lorebook.query({ text: queryText, topK, minScore });
+                if (Array.isArray(entries)) {
+                    entries.forEach(e => push(e?.text || e?.content || e?.value || ''));
+                }
+            } catch (e) { console.warn('[Lorebook] Lorebook.query failed:', e); }
+        }
+
+        if (out.length === 0) return '';
+
+        // Join and clamp to avoid runaway token usage
+        const joined = out.join('\n\n');
+        return joined.length > maxChars ? joined.slice(0, maxChars) : joined;
+    } catch (e) {
+        console.warn('[Lorebook] Failed to build appendix:', e);
+        return '';
+    }
+}
 
 // Replace existing definition with this version
 function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
@@ -157,15 +246,17 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
 // Incremental Multi‑Stage Generation (Narration -> Thinking -> Main -> LongTermSummary)
 // Strictly uses STM pipeline output (message_template-expanded string) as the base.
 // No message history selection/filtering is used for LLM calls.
-async function __runIncrementalMultiStageResponse(stmBase) {
+// Update signature to accept eventData, and inject lorebook blocks into every stage prompt
+// Replace the existing __runIncrementalMultiStageResponse(stmBase) definition with:
+async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     const S = USER.tableBaseSetting || {};
     const narrationTpl = (S.narration_template || '').trim();
-    const thinkingTpl = (S.thinking_template || '').trim(); // optional
+    const thinkingTpl = (S.thinking_template || '').trim();
     const mainTpl = (S.main_response_template || '').trim();
-    const longTermSummaryTpl = (S.long_term_summary_template || '').trim(); // optional
+    const longTermSummaryTpl = (S.long_term_summary_template || '').trim();
     if (!narrationTpl || !mainTpl) return false;
 
-    const previousSummary = '';// getLongTermSummary();
+    const previousSummary = getLongTermSummary();
 
     const expand = (tpl, ctx) => tpl
         .replace(/{{narration}}/g, ctx.narration || '')
@@ -185,6 +276,10 @@ async function __runIncrementalMultiStageResponse(stmBase) {
         return typeof raw === 'string' ? raw.trim() : '';
     }
 
+    // Build lorebook appendix once, reuse across stages
+    const loreAppendix = await __buildLorebookAppendix(eventData, stmBase);
+    const loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
+
     // Prepare a new assistant message we'll build up stage-by-stage
     const ctx = USER.getContext();
     ctx.chat = ctx.chat || [];
@@ -201,6 +296,7 @@ async function __runIncrementalMultiStageResponse(stmBase) {
     // Stage 1: Narration
     const narrationPrompt = [
         stmBase,
+        loreBlock,
         expand(narrationTpl, { previous_summary: previousSummary })
     ].filter(Boolean).join('\n\n');
 
@@ -214,6 +310,7 @@ async function __runIncrementalMultiStageResponse(stmBase) {
     if (thinkingTpl) {
         const thinkingPrompt = [
             stmBase,
+            loreBlock,
             `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
             expand(thinkingTpl, { narration: narrationResp, previous_summary: previousSummary })
         ].filter(Boolean).join('\n\n');
@@ -228,6 +325,7 @@ async function __runIncrementalMultiStageResponse(stmBase) {
     // Stage 3: Main Response (last stage shown to the user; triggers tableEdit if present)
     const mainPrompt = [
         stmBase,
+        loreBlock,
         `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
         thinkingResp ? `[THINKING START]\n${thinkingResp}\n[THINKING END]` : '',
         expand(mainTpl, { narration: narrationResp, thinking: thinkingResp, previous_summary: previousSummary })
@@ -242,10 +340,10 @@ async function __runIncrementalMultiStageResponse(stmBase) {
     if (longTermSummaryTpl) {
         const summaryPrompt = [
             stmBase,
+            loreBlock,
             `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
             `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
             thinkingResp ? `[THINKING START]\n${thinkingResp}\n[THINKING END]` : '',
-            // Exclude <tableEdit> ... </tableEdit> to avoid duplicating rows in data store
             `[MAIN START]\n${__stripTableEditBlocks(mainResp)}\n[MAIN END]`,
             expand(longTermSummaryTpl, {
                 narration: narrationResp,
@@ -1061,7 +1159,7 @@ async function onChatCompletionPromptReady(eventData) {
         if ((USER.tableBaseSetting.narration_template || '').trim() &&
             (USER.tableBaseSetting.main_response_template || '').trim() &&
             USER.tableBaseSetting.step_by_step !== true) {
-            const handled = await __runIncrementalMultiStageResponse(stmBase);
+            const handled = await __runIncrementalMultiStageResponse(eventData, stmBase);
             if (handled) return;
         }
 
