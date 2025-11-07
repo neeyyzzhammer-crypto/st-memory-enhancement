@@ -202,7 +202,7 @@ async function __callLorebookEngine(queryText, S = {}) {
 async function __buildLorebookAppendix(eventData, baseText) {
     try {
         const S = USER.tableBaseSetting || {};
-        if (S.enable_lorebook_stages !== true) return '';
+        //if (S.enable_lorebook_stages !== true) return '';
 
         // Choose query source
         let queryText = '';
