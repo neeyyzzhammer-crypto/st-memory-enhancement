@@ -561,6 +561,31 @@ function InitBinging() {
         const value = $(this).val();
         USER.tableBaseSetting.message_template = value;
     })
+    $(document).on('change', '#enable_narration_stage', function () {
+        USER.tableBaseSetting.enable_narration_stage = this.checked;
+        USER.saveSettings && USER.saveSettings();
+    });
+    $(document).on('change', '#enable_thinking_stage', function () {
+        USER.tableBaseSetting.enable_thinking_stage = this.checked;
+        USER.saveSettings && USER.saveSettings();
+    });
+    $(document).on('change', '#enable_main_stage', function () {
+        USER.tableBaseSetting.enable_main_stage = this.checked;
+        USER.saveSettings && USER.saveSettings();
+    });
+    $(document).on('change', '#enable_long_term_summary_stage', function () {
+        USER.tableBaseSetting.enable_long_term_summary_stage = this.checked;
+        USER.saveSettings && USER.saveSettings();
+    });
+
+    function syncStageToggleUI() {
+        const S = USER.tableBaseSetting || {};
+        $('#enable_narration_stage').prop('checked', S.enable_narration_stage !== false);
+        $('#enable_thinking_stage').prop('checked', S.enable_thinking_stage !== false);
+        $('#enable_main_stage').prop('checked', S.enable_main_stage !== false);
+        $('#enable_long_term_summary_stage').prop('checked', S.enable_long_term_summary_stage !== false);
+    }
+    syncStageToggleUI();
 
     $('#dataTable_thinking_template').on('input', function () {
         USER.tableBaseSetting.thinking_template = $(this).val();

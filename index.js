@@ -613,11 +613,16 @@ function __buildStmBase(eventData, promptContent, thinkingContent, stm) {
 
 async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     const S = USER.tableBaseSetting || {};
-    const narrationTpl = (S.narration_template || '').trim();
-    const thinkingTpl = (S.thinking_template || '').trim();
-    const mainTpl = (S.main_response_template || '').trim();
-    const longTermSummaryTpl = (S.long_term_summary_template || '').trim();
-    if (!narrationTpl || !mainTpl) return false;
+    
+    const enableNarration = S.enable_narration_stage !== false;
+    const enableThinking = S.enable_thinking_stage !== false;
+    const enableMain = S.enable_main_stage !== false;
+    const enableSummary = S.enable_long_term_summary_stage !== false;
+    let narrationTpl = enableNarration ? (S.narration_template || '').trim() : '';
+    let thinkingTpl = enableThinking ? (S.thinking_template || '').trim() : '';
+    let mainTpl = enableMain ? (S.main_response_template || '').trim() : '';
+    let longTermSummaryTpl = enableSummary ? (S.long_term_summary_template || '').trim() : '';
+
 
     const previousSummary = getLongTermSummary();
     const { userName, charName } = getCurrentChatNames();
@@ -686,27 +691,28 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
 
     stmBase = stmBase.replace(/<BEAT>/g, '');
     stmBase = stmBase.replace(/<SEX>/g, '');
+    let narrationResp = '';
+    if (narrationTpl) {
+        // Stage 1: Narration
+        let narrationPrompt = [
+            stmBase,
+            narrationTpl
+        ].filter(Boolean).join('\n\n');
+        let narrationLoreSource = [narrationTpl, previousSummary].filter(Boolean).join('\n\n');
+        narrationLoreSource = __applyNameMacros(narrationLoreSource);
 
-    // Stage 1: Narration
-    let narrationPrompt = [
-        stmBase,        
-        narrationTpl
-    ].filter(Boolean).join('\n\n');
-    let narrationLoreSource = [narrationTpl, previousSummary].filter(Boolean).join('\n\n');
-    narrationLoreSource = __applyNameMacros(narrationLoreSource);
+        let loreAppendix = '';// await __buildLorebookAppendix(eventData, narrationLoreSource);
+        let loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
+        loreBlock = __applyNameMacros(loreBlock);
 
-    let loreAppendix = '';// await __buildLorebookAppendix(eventData, narrationLoreSource);
-    let loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
-    loreBlock = __applyNameMacros(loreBlock);
+        let narrationPrompt2 = [narrationPrompt, loreBlock].filter(Boolean).join('\n\n');
+        narrationPrompt2 = narrationPrompt2.replace(/<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+        narrationPrompt2 = __applyNameMacros(narrationPrompt2);
 
-    let narrationPrompt2 = [narrationPrompt, loreBlock].filter(Boolean).join('\n\n');
-    narrationPrompt2 = narrationPrompt2.replace(/<_sexd>[\s\S]*?<\/_sexd>/gi, '');
-    narrationPrompt2 = __applyNameMacros(narrationPrompt2);
-
-    const rawNarration = await callStage(narrationPrompt2);
-    let { text: narrationResp } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
-    appendBlockToAssistant(baseAssistantIndex, 'narration', narrationResp || '(no narration)', { triggerTableEdit: false });
-
+        const rawNarration = await callStage(narrationPrompt2);
+        narrationResp = __sanitizeDeepSeekOutput(rawNarration, 'narration');
+        appendBlockToAssistant(baseAssistantIndex, 'narration', narrationResp || '(no narration)', { triggerTableEdit: false });
+    }
     // Stage 2: Thinking (optional)
     let thinkingResp = '';
     if (thinkingTpl) {
@@ -727,20 +733,22 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
 
     }
 
-    // Stage 3: Main Response (last stage shown to the user; triggers tableEdit if present)
-    let mainPrompt = [
-        stmBase,
-        loreBlock,
-        `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
-        thinkingResp ? `[THINKING START]\n${thinkingResp}\n[THINKING END]` : '',
-        expand(mainTpl, { narration: narrationResp, thinking: thinkingResp})
-    ].filter(Boolean).join('\n\n');
-    mainPrompt = mainPrompt.replace(/<_beat>[\s\S]*?<\/_beat>/gi, '');
-    mainPrompt = __applyNameMacros(mainPrompt);
-    const rawMain = await callStage(mainPrompt);
-    const { text: mainResp } = __sanitizeDeepSeekOutput(rawMain, 'main');
-    appendBlockToAssistant(baseAssistantIndex, 'main', mainResp, { triggerTableEdit: true });
-
+    let mainResp = '';
+    if (mainTpl) {
+        // Stage 3: Main Response (last stage shown to the user; triggers tableEdit if present)
+        let mainPrompt = [
+            stmBase,
+            loreBlock,
+            `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
+            thinkingResp ? `[THINKING START]\n${thinkingResp}\n[THINKING END]` : '',
+            expand(mainTpl, { narration: narrationResp, thinking: thinkingResp })
+        ].filter(Boolean).join('\n\n');
+        mainPrompt = mainPrompt.replace(/<_beat>[\s\S]*?<\/_beat>/gi, '');
+        mainPrompt = __applyNameMacros(mainPrompt);
+        const rawMain = await callStage(mainPrompt);
+         mainResp  = __sanitizeDeepSeekOutput(rawMain, 'main');
+        appendBlockToAssistant(baseAssistantIndex, 'main', mainResp, { triggerTableEdit: true });
+    }
 
     // Stage 4: Long Term Summary (do NOT append to UI; update store only)
     if (longTermSummaryTpl) {
