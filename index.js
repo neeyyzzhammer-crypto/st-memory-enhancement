@@ -710,7 +710,8 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         narrationPrompt2 = __applyNameMacros(narrationPrompt2);
 
         const rawNarration = await callStage(narrationPrompt2);
-        narrationResp = __sanitizeDeepSeekOutput(rawNarration, 'narration');
+        const { text } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
+        narrationResp = text;
         appendBlockToAssistant(baseAssistantIndex, 'narration', narrationResp || '(no narration)', { triggerTableEdit: false });
     }
     // Stage 2: Thinking (optional)
@@ -746,7 +747,8 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         mainPrompt = mainPrompt.replace(/<_beat>[\s\S]*?<\/_beat>/gi, '');
         mainPrompt = __applyNameMacros(mainPrompt);
         const rawMain = await callStage(mainPrompt);
-         mainResp  = __sanitizeDeepSeekOutput(rawMain, 'main');
+        const { text } = __sanitizeDeepSeekOutput(rawMain, 'main');
+        mainResp = text;
         appendBlockToAssistant(baseAssistantIndex, 'main', mainResp, { triggerTableEdit: true });
     }
 
