@@ -1485,13 +1485,13 @@ async function onChatCompletionPromptReady(eventData) {
             console.warn('[RAG] vectorize on prompt-ready failed:', e);
         }
 
-        // Short-term memory config (needed for STM assembly)
-        //const stm = parseInt(
-        //    USER.tableBaseSetting?.short_term_memory ??
-        //    $('#dataTable_short_term_memory').val() ??
-        //    '0',
-        //    10
-        //) || 0;
+         Short-term memory config (needed for STM assembly)
+        const stm = parseInt(
+            USER.tableBaseSetting?.short_term_memory ??
+            $('#dataTable_short_term_memory').val() ??
+            '0',
+            10
+        ) || 0;
 
         // Build components of STM pipeline
         const promptContent = await initTableDataWithRag(eventData); // processed message_template (tableData + long_term_memory)
