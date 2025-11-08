@@ -925,7 +925,19 @@ export function loadSettings() {
     if (typeof USER.tableBaseSetting.enable_lorebook_stages !== 'boolean') {
         USER.tableBaseSetting.enable_lorebook_stages = false;
     }
-
+    // Stage toggles defaults (prevent "not found" from proxy)
+    if (typeof USER.tableBaseSetting.enable_narration_stage !== 'boolean') {
+        USER.tableBaseSetting.enable_narration_stage = true;
+    }
+    if (typeof USER.tableBaseSetting.enable_thinking_stage !== 'boolean') {
+        USER.tableBaseSetting.enable_thinking_stage = true;
+    }
+    if (typeof USER.tableBaseSetting.enable_main_stage !== 'boolean') {
+        USER.tableBaseSetting.enable_main_stage = true;
+    }
+    if (typeof USER.tableBaseSetting.enable_long_term_summary_stage !== 'boolean') {
+        USER.tableBaseSetting.enable_long_term_summary_stage = true;
+    }
     if (USER.tableBaseSetting.deep < 0) formatDeep();
 
     renderSetting();

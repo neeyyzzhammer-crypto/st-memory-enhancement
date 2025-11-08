@@ -65,6 +65,10 @@ export async function filterTableDataPopup(originalData, title, warning) {
     waitingRegister.thinking_template = '#table_init_injection';
     waitingRegister.keep_reasoning_in_stmBase = '#table_init_injection'; // NEW
 
+    waitingRegister.enable_narration_stage = '#table_init_injection'; // NEW
+    waitingRegister.enable_thinking_stage = '#table_init_injection'; // NEW
+    waitingRegister.enable_main_stage = '#table_init_injection'; // NEW
+    waitingRegister.enable_long_term_summary_stage = '#table_init_injection'; // NEW
     waitingRegister.enable_rag = '#table_init_injection';
     waitingRegister.rag_similarity = '#table_init_injection';
     waitingRegister.rag_top_k = '#table_init_injection';     // NEW
@@ -133,6 +137,10 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
     short_term_memory: 2,
     critical_thinking_memory: 1,          // NEW: how many past <critical_thinking> sections to include separately
     keep_reasoning_in_stmBase: false, // NEW: keep <critical_thinking> blocks inside stmBase if true
+    enable_narration_stage: true,
+    enable_thinking_stage: true,
+    enable_main_stage: true,
+    enable_long_term_summary_stage: true,
     enable_rag: false,
     rag_similarity: 0.25,
     rag_top_k: 3,       // NEW
