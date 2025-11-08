@@ -687,7 +687,9 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         eventSource.emit(event_types.MESSAGE_RECEIVED, baseAssistantIndex);
         eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, baseAssistantIndex);
     } catch { }
-
+    let loreAppendix = '';// await __buildLorebookAppendix(eventData, narrationLoreSource);
+    let loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
+    loreBlock = __applyNameMacros(loreBlock);
 
     stmBase = stmBase.replace(/<BEAT>/g, '');
     stmBase = stmBase.replace(/<SEX>/g, '');
@@ -701,9 +703,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         let narrationLoreSource = [narrationTpl, previousSummary].filter(Boolean).join('\n\n');
         narrationLoreSource = __applyNameMacros(narrationLoreSource);
 
-        let loreAppendix = '';// await __buildLorebookAppendix(eventData, narrationLoreSource);
-        let loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
-        loreBlock = __applyNameMacros(loreBlock);
+       
 
         let narrationPrompt2 = [narrationPrompt, loreBlock].filter(Boolean).join('\n\n');
         narrationPrompt2 = narrationPrompt2.replace(/<_sexd>[\s\S]*?<\/_sexd>/gi, '');
