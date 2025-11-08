@@ -1485,7 +1485,7 @@ async function onChatCompletionPromptReady(eventData) {
             console.warn('[RAG] vectorize on prompt-ready failed:', e);
         }
 
-         Short-term memory config (needed for STM assembly)
+         //Short-term memory config (needed for STM assembly)
         const stm = parseInt(
             USER.tableBaseSetting?.short_term_memory ??
             $('#dataTable_short_term_memory').val() ??
