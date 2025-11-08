@@ -1495,78 +1495,78 @@ async function onChatCompletionPromptReady(eventData) {
 
         // Build components of STM pipeline
         const promptContent = await initTableDataWithRag(eventData); // processed message_template (tableData + long_term_memory)
-        //const thinkingContent = initThinkingData(eventData);         // thinking_template with previous critical thinking memory
+        const thinkingContent = initThinkingData(eventData);         // thinking_template with previous critical thinking memory
 
-        //const role = getMesRole();
-        //let lastUserIdx = -1;
-        //for (let i = eventData.chat.length - 1; i >= 0; i--) {
-        //    if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
-        //}
+        const role = getMesRole();
+        let lastUserIdx = -1;
+        for (let i = eventData.chat.length - 1; i >= 0; i--) {
+            if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
+        }
 
-        //// Apply original STM injection logic to eventData.chat (this constructs the "raw prompt")
-        //let insertedIndices = [];
-        //if (stm === 0) {
-        //    // Collapse context to a single (augmented) last user message
-        //    if (lastUserIdx !== -1) {
-        //        const merged = [thinkingContent, promptContent]
-        //            .filter(s => typeof s === 'string' && s.trim().length > 0)
-        //            .join('\n\n');
-        //        if (merged) {
-        //            const prev = eventData.chat[lastUserIdx].content || '';
-        //            eventData.chat[lastUserIdx].content = `${merged}\n\n${prev}`;
-        //        }
-        //        // For stmBase we use this augmented user message only
-        //    } else if (promptContent || thinkingContent) {
-        //        // No user message present, inject as a standalone role block
-        //        const standalone = [thinkingContent, promptContent]
-        //            .filter(s => s && s.trim()).join('\n\n');
-        //        if (standalone) {
-        //            eventData.chat.push({ role, content: standalone });
-        //            insertedIndices.push(eventData.chat.length - 1);
-        //        }
-        //    }
-        //} else {
-        //    // Keep a window (legacy behavior) but still prepend injection to latest user or insert near tail
-        //    const hasThinking = thinkingContent && thinkingContent.trim();
-        //    const hasPrompt = promptContent && promptContent.trim();
-        //    if (lastUserIdx !== -1 && (hasThinking || hasPrompt)) {
-        //        const prev = eventData.chat[lastUserIdx].content || '';
-        //        const parts = [];
-        //        if (hasThinking) parts.push(thinkingContent);
-        //        if (hasPrompt) parts.push(promptContent);
-        //        eventData.chat[lastUserIdx].content = `${parts.join('\n\n')}\n\n${prev}`;
-        //    } else if (hasThinking || hasPrompt) {
-        //        const inserts = [];
-        //        if (hasThinking) inserts.push({ role, content: thinkingContent });
-        //        if (hasPrompt) inserts.push({ role, content: promptContent });
-        //        const deepVal = Number.isFinite(USER.tableBaseSetting.deep) ? USER.tableBaseSetting.deep : 1;
-        //        const insertAt = (deepVal <= 0)
-        //            ? Math.max(eventData.chat.length - 1, 0)
-        //            : Math.max(eventData.chat.length - deepVal, 0);
-        //        eventData.chat.splice(insertAt, 0, ...inserts);
-        //        for (let k = 0; k < inserts.length; k++) insertedIndices.push(insertAt + k);
-        //    }
+        // Apply original STM injection logic to eventData.chat (this constructs the "raw prompt")
+        let insertedIndices = [];
+        if (stm === 0) {
+            // Collapse context to a single (augmented) last user message
+            if (lastUserIdx !== -1) {
+                const merged = [thinkingContent, promptContent]
+                    .filter(s => typeof s === 'string' && s.trim().length > 0)
+                    .join('\n\n');
+                if (merged) {
+                    const prev = eventData.chat[lastUserIdx].content || '';
+                    eventData.chat[lastUserIdx].content = `${merged}\n\n${prev}`;
+                }
+                // For stmBase we use this augmented user message only
+            } else if (promptContent || thinkingContent) {
+                // No user message present, inject as a standalone role block
+                const standalone = [thinkingContent, promptContent]
+                    .filter(s => s && s.trim()).join('\n\n');
+                if (standalone) {
+                    eventData.chat.push({ role, content: standalone });
+                    insertedIndices.push(eventData.chat.length - 1);
+                }
+            }
+        } else {
+            // Keep a window (legacy behavior) but still prepend injection to latest user or insert near tail
+            const hasThinking = thinkingContent && thinkingContent.trim();
+            const hasPrompt = promptContent && promptContent.trim();
+            if (lastUserIdx !== -1 && (hasThinking || hasPrompt)) {
+                const prev = eventData.chat[lastUserIdx].content || '';
+                const parts = [];
+                if (hasThinking) parts.push(thinkingContent);
+                if (hasPrompt) parts.push(promptContent);
+                eventData.chat[lastUserIdx].content = `${parts.join('\n\n')}\n\n${prev}`;
+            } else if (hasThinking || hasPrompt) {
+                const inserts = [];
+                if (hasThinking) inserts.push({ role, content: thinkingContent });
+                if (hasPrompt) inserts.push({ role, content: promptContent });
+                const deepVal = Number.isFinite(USER.tableBaseSetting.deep) ? USER.tableBaseSetting.deep : 1;
+                const insertAt = (deepVal <= 0)
+                    ? Math.max(eventData.chat.length - 1, 0)
+                    : Math.max(eventData.chat.length - deepVal, 0);
+                eventData.chat.splice(insertAt, 0, ...inserts);
+                for (let k = 0; k < inserts.length; k++) insertedIndices.push(insertAt + k);
+            }
 
-        //    // Trim visible slice for sending (previous code trimmed eventData.chat itself).
-        //    const total = eventData.chat.length;
-        //    const keepCount = Math.min(total, stm * 2);
-        //    if (stm >= 0 && keepCount < total) {
-        //        eventData.chat = eventData.chat.slice(total - keepCount);
-        //        // Adjust lastUserIdx after slice
-        //        lastUserIdx = -1;
-        //        for (let i = eventData.chat.length - 1; i >= 0; i--) {
-        //            if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
-        //        }
-        //    }
-        //}
+            // Trim visible slice for sending (previous code trimmed eventData.chat itself).
+            const total = eventData.chat.length;
+            const keepCount = Math.min(total, stm * 2);
+            if (stm >= 0 && keepCount < total) {
+                eventData.chat = eventData.chat.slice(total - keepCount);
+                // Adjust lastUserIdx after slice
+                lastUserIdx = -1;
+                for (let i = eventData.chat.length - 1; i >= 0; i--) {
+                    if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
+                }
+            }
+        }
 
         // Derive stmBase (FULL raw prompt to feed multi-stage):
         // Priority: augmented last user message; else concatenation of inserted system/user messages.
-        let stmBase = '';// eventData.chat
-        //    .map(m => {
-        //        return JSON.stringify(m)
-        //    })            
-        //    .join('\n');
+        let stmBase = eventData.chat
+            .map(m => {
+                return JSON.stringify(m)
+            })            
+            .join('\n');
         //stmBase = [stmBase, promptContent].join('\n\n');
         // Decide early if we will take over generation (and cancel default LLM immediately)
         const hasAnyStage = ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
