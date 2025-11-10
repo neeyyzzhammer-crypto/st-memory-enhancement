@@ -704,7 +704,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             narrationTpl
         ].filter(Boolean).join('\n\n');        
         narrationPromptA = [...stmBase, { role: 'system', content: narrationPrompt }];
-        narrationPromptA = applyReplaceInPlace(narrationPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+        narrationPromptA = replaceInMessages(narrationPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         __applyNameMacros(narrationPromptA);
         const rawNarration = await callStage(narrationPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
@@ -719,9 +719,9 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             expand(thinkingTpl, { narration: narrationResp })
         ].filter(Boolean).join('\n\n');
         thinkingPromptA = [...stmBase, { role: 'system', content: thinkingPrompt }];
-        thinkingPromptA = applyReplaceInPlace(thinkingPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
-        thinkingPromptA = applyReplaceInPlace(thinkingPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
-        thinkingPromptA = applyReplaceInPlace(thinkingPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');
+        thinkingPromptA = replaceInMessages(thinkingPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
+        thinkingPromptA = replaceInMessages(thinkingPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+        thinkingPromptA = replaceInMessages(thinkingPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');
         __applyNameMacros(thinkingPromptA);
         const rawThinking = await callStage(thinkingPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawThinking, 'thinking');
