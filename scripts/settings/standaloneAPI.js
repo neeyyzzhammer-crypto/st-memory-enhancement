@@ -134,14 +134,14 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
 
     if (Array.isArray(systemPrompt)) {
         const messages = systemPrompt;
-        //normalizedMessages = rawPromptData.map((m, idx) => {
-        //    const role = (m && typeof m.role === 'string') ? m.role : 'user';
-        //    const content = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
-        //    if (!content.trim()) {
-        //        console.warn(`[handleCustomAPIRequest] 第 ${idx} 条消息内容为空，已转换为空字符串。`);
-        //    }
-        //    return { role, content };
-        //});
+        normalizedMessages = rawPromptData.map((m, idx) => {
+            const role = (m && typeof m.role === 'string') ? m.role : 'user';
+            const content = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
+            if (!content.trim()) {
+                console.warn(`[handleCustomAPIRequest] 第 ${idx} 条消息内容为空，已转换为空字符串。`);
+            }
+            return { role, content };
+        });
         // UI toast
         createLoadingToast(true, isSilent).then((r) => {
             if (loadingToast) loadingToast.close();
@@ -168,7 +168,7 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         //}
         if (true) {
             const response = await EDITOR.generateRaw({
-                prompt: messages,
+                prompt: normalizedMessages,
                 api: 'openai',
                 systemPrompt: '', // already embedded as messages
                 trimNames: true,
