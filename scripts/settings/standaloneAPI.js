@@ -134,7 +134,14 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
 
     if (Array.isArray(systemPrompt)) {
         const messages = systemPrompt;
-
+        normalizedMessages = rawPromptData.map((m, idx) => {
+            const role = (m && typeof m.role === 'string') ? m.role : 'user';
+            const content = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
+            if (!content.trim()) {
+                console.warn(`[handleCustomAPIRequest] 第 ${idx} 条消息内容为空，已转换为空字符串。`);
+            }
+            return { role, content };
+        });
         // UI toast
         createLoadingToast(true, isSilent).then((r) => {
             if (loadingToast) loadingToast.close();
@@ -166,7 +173,7 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
                 if(!TavernHelper) throw new Error("酒馆助手未安装，总结功能依赖于酒馆助手插件，请安装后刷新");
 
                 const response = await TavernHelper.generateRaw({
-                    ordered_prompts: messages, // Pass the array directly
+                    ordered_prompts: normalizedMessages, // Pass the array directly
                     should_stream: true,      // Re-enable streaming
                 });
             loadingToast?.close();
