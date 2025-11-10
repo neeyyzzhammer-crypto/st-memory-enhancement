@@ -633,9 +633,10 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
 
     const previousSummary = getLongTermSummary();
     const { userName, charName } = getCurrentChatNames();
-    const __applyNameMacros = (s) => {       
-        applyReplaceInPlace(s, /{{user}}/gi, userName);        
-        applyReplaceInPlace(s, /{{char}}/gi, charName);        
+    const __applyNameMacros = (s) => {
+        return s
+        .replace(/{{user}}/gi, userName)       
+        .replace(/{{char}}/gi, charName);        
     };
     const expand = (tpl, ctx) => tpl
         .replace(/{{narration}}/g, ctx.narration || '')
@@ -702,10 +703,10 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         let narrationPrompt = [            
             `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
             narrationTpl
-        ].filter(Boolean).join('\n\n');        
+        ].filter(Boolean).join('\n\n'); 
+        narrationPrompt=__applyNameMacros(narrationPrompt);
         let narrationPromptA = [...stmBase, { role: 'system', content: narrationPrompt }];
         narrationPromptA = replaceInMessages(narrationPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
-        __applyNameMacros(narrationPromptA);
         const rawNarration = await callStage(narrationPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
         narrationResp = text;
@@ -718,11 +719,11 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
             expand(thinkingTpl, { narration: narrationResp })
         ].filter(Boolean).join('\n\n');
+        thinkingPrompt = __applyNameMacros(thinkingPrompt);
         let thinkingPromptA = [...stmBase, { role: 'system', content: thinkingPrompt }];
         thinkingPromptA = replaceInMessages(thinkingPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         thinkingPromptA = replaceInMessages(thinkingPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
-        thinkingPromptA = replaceInMessages(thinkingPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');
-        __applyNameMacros(thinkingPromptA);
+        thinkingPromptA = replaceInMessages(thinkingPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');        
         const rawThinking = await callStage(thinkingPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawThinking, 'thinking');
         thinkingResp = text;
@@ -737,9 +738,9 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
             expand(mainTpl, { narration: narrationResp, thinking: thinkingResp })
         ].filter(Boolean).join('\n\n');
+        mainPrompt = __applyNameMacros(mainPrompt);
         let mainPromptA = [...stmBase, { role: 'system', content: mainPrompt }];
         mainPromptA = replaceInMessages(mainPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
-        __applyNameMacros(mainPromptA);
         const rawMain = await callStage(mainPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawMain, 'main');
         mainResp = text;
@@ -764,11 +765,11 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
                 main: __stripTableEditBlocks(mainResp)
             })
         ].filter(Boolean).join('\n\n');
+        summaryPrompt = __applyNameMacros(summaryPrompt);
         let summaryPromptA = [...stmBase, { role: 'system', content: summaryPrompt }];
         summaryPromptA = replaceInMessages(summaryPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         summaryPromptA = replaceInMessages(summaryPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         summaryPromptA = replaceInMessages(summaryPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');
-        __applyNameMacros(summaryPromptA);
         const rawSummary = await callStage(summaryPromptA);
         const { text: summaryResp } = __sanitizeDeepSeekOutput(rawSummary, 'main');
         updateLongTermSummary({

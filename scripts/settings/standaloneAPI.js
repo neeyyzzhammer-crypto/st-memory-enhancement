@@ -159,19 +159,19 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         //    loadingToast?.close();
         //    return suspended ? 'suspended' : response;
         //}
-        //if (true) {
+        if (true) {
         
-        //        // Use TavernHelper.generateRaw with the array, enabling streaming
+                // Use TavernHelper.generateRaw with the array, enabling streaming
 
-        //        if(!TavernHelper) throw new Error("酒馆助手未安装，总结功能依赖于酒馆助手插件，请安装后刷新");
+                if(!TavernHelper) throw new Error("酒馆助手未安装，总结功能依赖于酒馆助手插件，请安装后刷新");
 
-        //        const response = await TavernHelper.generateRaw({
-        //            ordered_prompts: messages, // Pass the array directly
-        //            should_stream: true,      // Re-enable streaming
-        //        });
-        //    loadingToast?.close();
-        //    return suspended ? 'suspended' : response;
-        //}
+                const response = await TavernHelper.generateRaw({
+                    ordered_prompts: messages, // Pass the array directly
+                    should_stream: true,      // Re-enable streaming
+                });
+            loadingToast?.close();
+            return suspended ? 'suspended' : response;
+        }
 
         // Fallbacks (no TavernHelper):
         // 1) Single-message array (multistage uses this): call EDITOR.generateRaw directly
