@@ -703,7 +703,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
             narrationTpl
         ].filter(Boolean).join('\n\n');        
-        narrationPromptA = [...stmBase, { role: 'system', content: narrationPrompt }];
+        let narrationPromptA = [...stmBase, { role: 'system', content: narrationPrompt }];
         narrationPromptA = replaceInMessages(narrationPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         __applyNameMacros(narrationPromptA);
         const rawNarration = await callStage(narrationPromptA);
@@ -718,7 +718,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
             expand(thinkingTpl, { narration: narrationResp })
         ].filter(Boolean).join('\n\n');
-        thinkingPromptA = [...stmBase, { role: 'system', content: thinkingPrompt }];
+        let thinkingPromptA = [...stmBase, { role: 'system', content: thinkingPrompt }];
         thinkingPromptA = replaceInMessages(thinkingPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         thinkingPromptA = replaceInMessages(thinkingPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         thinkingPromptA = replaceInMessages(thinkingPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');
@@ -737,7 +737,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
             expand(mainTpl, { narration: narrationResp, thinking: thinkingResp })
         ].filter(Boolean).join('\n\n');
-        mainPromptA = [...stmBase, { role: 'system', content: mainPrompt }];
+        let mainPromptA = [...stmBase, { role: 'system', content: mainPrompt }];
         mainPromptA = replaceInMessages(mainPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         __applyNameMacros(mainPromptA);
         const rawMain = await callStage(mainPromptA);
@@ -764,7 +764,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
                 main: __stripTableEditBlocks(mainResp)
             })
         ].filter(Boolean).join('\n\n');
-        summaryPromptA = [...stmBase, { role: 'system', content: summaryPrompt }];
+        let summaryPromptA = [...stmBase, { role: 'system', content: summaryPrompt }];
         summaryPromptA = replaceInMessages(summaryPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         summaryPromptA = replaceInMessages(summaryPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         summaryPromptA = replaceInMessages(summaryPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');
