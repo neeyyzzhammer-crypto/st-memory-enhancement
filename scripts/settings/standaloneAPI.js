@@ -133,15 +133,21 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
     let suspended = false;
 
     if (Array.isArray(systemPrompt)) {
-        const messages = systemPrompt;
-        normalizedMessages = systemPrompt.map((m, idx) => {
+        const rawMessages = systemPrompt;
+
+        // Normalize into array of strings for TavernHelper (step-style),
+        // and separately into role/content objects for openai fallback.
+        const normalizedObjects = rawMessages.map((m, idx) => {
             const role = (m && typeof m.role === 'string') ? m.role : 'user';
             const content = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
             if (!content.trim()) {
-                console.warn(`[handleCustomAPIRequest] 第 ${idx} 条消息内容为空，已转换为空字符串。`);
+                console.warn(`[handleMainAPIRequest] message[${idx}] content empty; coerced to empty string.`);
             }
             return { role, content };
         });
+
+        const orderedPrompts = normalizedObjects.map(o => o.content);
+
         // UI toast
         createLoadingToast(true, isSilent).then((r) => {
             if (loadingToast) loadingToast.close();
@@ -167,14 +173,13 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         //    return suspended ? 'suspended' : response;
         //}
         if (true) {
-            const response = await EDITOR.generateRaw({
-                prompt: normalizedMessages,
-                api: 'openai',
-                systemPrompt: '', // already embedded as messages
-                trimNames: true,
+            const response = await TavernHelper.generateRaw({
+                ordered_prompts: orderedPrompts,
+                should_stream: true,
             });
             loadingToast?.close();
             return suspended ? 'suspended' : response;
+
         }
 
         // Fallbacks (no TavernHelper):
