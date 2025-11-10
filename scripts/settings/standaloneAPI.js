@@ -148,7 +148,8 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
                 }
             });
         }
-
+        console.log('主API请求的多消息数组:', messages); // Log the actual array
+       
         // Preferred path: use TavernHelper when present
         //if (typeof window !== 'undefined' && window.TavernHelper?.generateRaw) {
         //    const response = await window.TavernHelper.generateRaw({
@@ -159,13 +160,15 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         //    return suspended ? 'suspended' : response;
         //}
         if (true) {
-            const response = await EDITOR.generateRaw(
-                messages,
-                '',
-                false,
-                false,
-                '' // no system prompt in this path
-            );
+        
+                // Use TavernHelper.generateRaw with the array, enabling streaming
+
+                if(!TavernHelper) throw new Error("酒馆助手未安装，总结功能依赖于酒馆助手插件，请安装后刷新");
+
+                const response = await TavernHelper.generateRaw({
+                    ordered_prompts: messages, // Pass the array directly
+                    should_stream: true,      // Re-enable streaming
+                });
             loadingToast?.close();
             return suspended ? 'suspended' : response;
         }
