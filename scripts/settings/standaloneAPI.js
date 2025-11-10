@@ -134,7 +134,7 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
 
     if (Array.isArray(systemPrompt)) {
         const messages = systemPrompt;
-        normalizedMessages = rawPromptData.map((m, idx) => {
+        normalizedMessages = systemPrompt.map((m, idx) => {
             const role = (m && typeof m.role === 'string') ? m.role : 'user';
             const content = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
             if (!content.trim()) {
