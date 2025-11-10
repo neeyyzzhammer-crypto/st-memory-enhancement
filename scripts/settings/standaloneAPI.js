@@ -134,14 +134,14 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
 
     if (Array.isArray(systemPrompt)) {
         const messages = systemPrompt;
-        normalizedMessages = rawPromptData.map((m, idx) => {
-            const role = (m && typeof m.role === 'string') ? m.role : 'user';
-            const content = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
-            if (!content.trim()) {
-                console.warn(`[handleCustomAPIRequest] 第 ${idx} 条消息内容为空，已转换为空字符串。`);
-            }
-            return { role, content };
-        });
+        //normalizedMessages = rawPromptData.map((m, idx) => {
+        //    const role = (m && typeof m.role === 'string') ? m.role : 'user';
+        //    const content = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
+        //    if (!content.trim()) {
+        //        console.warn(`[handleCustomAPIRequest] 第 ${idx} 条消息内容为空，已转换为空字符串。`);
+        //    }
+        //    return { role, content };
+        //});
         // UI toast
         createLoadingToast(true, isSilent).then((r) => {
             if (loadingToast) loadingToast.close();
@@ -155,7 +155,7 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
                 }
             });
         }
-        console.log('主API请求的多消息数组:', messages); // Log the actual array
+        console.log('主API请求的多消息数组:', normalizedMessages); // Log the actual array
        
         // Preferred path: use TavernHelper when present
         //if (typeof window !== 'undefined' && window.TavernHelper?.generateRaw) {
@@ -167,15 +167,12 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         //    return suspended ? 'suspended' : response;
         //}
         if (true) {
-        
-                // Use TavernHelper.generateRaw with the array, enabling streaming
-
-                if(!TavernHelper) throw new Error("酒馆助手未安装，总结功能依赖于酒馆助手插件，请安装后刷新");
-
-                const response = await TavernHelper.generateRaw({
-                    ordered_prompts: normalizedMessages, // Pass the array directly
-                    should_stream: true,      // Re-enable streaming
-                });
+            const response = await EDITOR.generateRaw({
+                prompt: messages,
+                api: 'openai',
+                systemPrompt: '', // already embedded as messages
+                trimNames: true,
+            });
             loadingToast?.close();
             return suspended ? 'suspended' : response;
         }
