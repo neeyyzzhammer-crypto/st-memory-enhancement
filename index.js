@@ -609,8 +609,15 @@ function __buildStmBase(eventData, promptContent, thinkingContent, stm) {
     const stmBase = replaceUserTag(lines.join('\n').replace(/\r/g, ''));
     return stmBase;
 }
-
-
+const replaceInMessages = (msgs, regex, replacement = '') =>
+    msgs.map(m => ({
+        ...m,
+        content: typeof m.content === 'string' ? m.content.replace(regex, replacement) : m.content
+    }));
+const applyReplaceInPlace = (msgs, regex, replacement = '') =>
+    msgs.forEach(m => {
+        if (typeof m.content === 'string') m.content = m.content.replace(regex, replacement);
+    });
 async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     const S = USER.tableBaseSetting || {};
     
@@ -626,13 +633,9 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
 
     const previousSummary = getLongTermSummary();
     const { userName, charName } = getCurrentChatNames();
-    const __applyNameMacros = (s) => {
-        if (typeof s !== 'string') return s;
-        return s
-            .replace(/{{user}}/gi, userName)
-            .replace(/<user>/g, userName)
-            .replace(/{{char}}/gi, charName)
-            .replace(/{{character}}/gi, charName);
+    const __applyNameMacros = (s) => {       
+        applyReplaceInPlace(s, /{{user}}/gi, userName);        
+        applyReplaceInPlace(s, /{{char}}/gi, charName);        
     };
     const expand = (tpl, ctx) => tpl
         .replace(/{{narration}}/g, ctx.narration || '')
@@ -647,7 +650,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
 
     // Stage caller with robust fallback: Custom -> Main
     async function callStage(payload) {
-        const messages = [{ role: 'user', content: payload }];
+        const messages = payload;
         const tryMain = async () => {
             try {
                 const raw = await handleMainAPIRequest(messages, null, true); // silent
@@ -687,29 +690,23 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         eventSource.emit(event_types.MESSAGE_RECEIVED, baseAssistantIndex);
         eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, baseAssistantIndex);
     } catch { }
-    let loreAppendix = '';// await __buildLorebookAppendix(eventData, narrationLoreSource);
-    let loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
-    loreBlock = __applyNameMacros(loreBlock);
+    //let loreAppendix = '';// await __buildLorebookAppendix(eventData, narrationLoreSource);
+    //let loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
+    //loreBlock = __applyNameMacros(loreBlock);
 
-    stmBase = stmBase.replace(/<BEAT>/g, '');
-    stmBase = stmBase.replace(/<SEX>/g, '');
+    //stmBase = replaceInMessages(stmBase, /<BEAT>/g, '');
+    //stmBase = replaceInMessages(stmBase, /<SEX>/g, '');
     let narrationResp = '';
     if (narrationTpl) {
         // Stage 1: Narration
-        let narrationPrompt = [
-            stmBase,
+        let narrationPrompt = [            
+            `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
             narrationTpl
-        ].filter(Boolean).join('\n\n');
-        let narrationLoreSource = [narrationTpl, previousSummary].filter(Boolean).join('\n\n');
-        narrationLoreSource = __applyNameMacros(narrationLoreSource);
-
-       
-
-        let narrationPrompt2 = [narrationPrompt, loreBlock].filter(Boolean).join('\n\n');
-        narrationPrompt2 = narrationPrompt2.replace(/<_sexd>[\s\S]*?<\/_sexd>/gi, '');
-        narrationPrompt2 = __applyNameMacros(narrationPrompt2);
-
-        const rawNarration = await callStage(narrationPrompt2);
+        ].filter(Boolean).join('\n\n');        
+        narrationPromptA = [...stmBase, { role: 'system', content: narrationPrompt }];
+        narrationPromptA = applyReplaceInPlace(narrationPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+        __applyNameMacros(narrationPromptA);
+        const rawNarration = await callStage(narrationPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
         narrationResp = text;
         appendBlockToAssistant(baseAssistantIndex, 'narration', narrationResp || '(no narration)', { triggerTableEdit: false });
@@ -718,16 +715,15 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     let thinkingResp = '';
     if (thinkingTpl) {
         let thinkingPrompt = [
-            stmBase,
-            loreBlock,
-            `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
+            `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
             expand(thinkingTpl, { narration: narrationResp })
         ].filter(Boolean).join('\n\n');
-        thinkingPrompt = thinkingPrompt.replace(/<_beat>[\s\S]*?<\/_beat>/gi, '');
-        thinkingPrompt = thinkingPrompt.replace(/<_sexd>[\s\S]*?<\/_sexd>/gi, '');
-        thinkingPrompt = thinkingPrompt.replace(/<_sex>[\s\S]*?<\/_sex>/gi, '');
-        thinkingPrompt = __applyNameMacros(thinkingPrompt);
-        const rawThinking = await callStage(thinkingPrompt);
+        thinkingPromptA = [...stmBase, { role: 'system', content: thinkingPrompt }];
+        thinkingPromptA = applyReplaceInPlace(thinkingPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
+        thinkingPromptA = applyReplaceInPlace(thinkingPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+        thinkingPromptA = applyReplaceInPlace(thinkingPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');
+        __applyNameMacros(thinkingPromptA);
+        const rawThinking = await callStage(thinkingPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawThinking, 'thinking');
         thinkingResp = text;
         appendBlockToAssistant(baseAssistantIndex, 'critical_thinking', thinkingResp, { triggerTableEdit: false });
@@ -738,15 +734,13 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     if (mainTpl) {
         // Stage 3: Main Response (last stage shown to the user; triggers tableEdit if present)
         let mainPrompt = [
-            stmBase,
-            loreBlock,
-            `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
-            thinkingResp ? `[THINKING START]\n${thinkingResp}\n[THINKING END]` : '',
+            `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
             expand(mainTpl, { narration: narrationResp, thinking: thinkingResp })
         ].filter(Boolean).join('\n\n');
-        mainPrompt = mainPrompt.replace(/<_beat>[\s\S]*?<\/_beat>/gi, '');
-        mainPrompt = __applyNameMacros(mainPrompt);
-        const rawMain = await callStage(mainPrompt);
+        mainPromptA = [...stmBase, { role: 'system', content: mainPrompt }];
+        mainPromptA = replaceInMessages(mainPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
+        __applyNameMacros(mainPromptA);
+        const rawMain = await callStage(mainPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawMain, 'main');
         mainResp = text;
         appendBlockToAssistant(baseAssistantIndex, 'main', mainResp, { triggerTableEdit: true });
@@ -762,24 +756,20 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
                 : (typeof chatArr[ui]?.mes === 'string' ? chatArr[ui].mes : ''))
             : '';
 
-        let summaryPrompt = [
-            stmBase,
-            loreBlock,
-            `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
-            `[NARRATION START]\n${narrationResp}\n[NARRATION END]`,
-            thinkingResp ? `[THINKING START]\n${thinkingResp}\n[THINKING END]` : '',
-            `[MAIN START]\n${__stripTableEditBlocks(mainResp)}\n[MAIN END]`,
+        let summaryPrompt = [           
+            `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,            
             expand(longTermSummaryTpl, {
                 narration: narrationResp,
                 thinking: thinkingResp,
                 main: __stripTableEditBlocks(mainResp)
             })
         ].filter(Boolean).join('\n\n');
-        summaryPrompt = summaryPrompt.replace(/<_beat>[\s\S]*?<\/_beat>/gi, '');
-        summaryPrompt = summaryPrompt.replace(/<_sexd>[\s\S]*?<\/_sexd>/gi, '');
-        summaryPrompt = summaryPrompt.replace(/<_sex>[\s\S]*?<\/_sex>/gi, '');
-        summaryPrompt = __applyNameMacros(summaryPrompt);
-        const rawSummary = await callStage(summaryPrompt);
+        summaryPromptA = [...stmBase, { role: 'system', content: summaryPrompt }];
+        summaryPromptA = replaceInMessages(summaryPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
+        summaryPromptA = replaceInMessages(summaryPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+        summaryPromptA = replaceInMessages(summaryPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');
+        __applyNameMacros(summaryPromptA);
+        const rawSummary = await callStage(summaryPromptA);
         const { text: summaryResp } = __sanitizeDeepSeekOutput(rawSummary, 'main');
         updateLongTermSummary({
             narration: narrationResp,
@@ -1572,13 +1562,8 @@ async function onChatCompletionPromptReady(eventData) {
 
         // Derive stmBase (FULL raw prompt to feed multi-stage):
         // Priority: augmented last user message; else concatenation of inserted system/user messages.
-        let stmBase =  eventData.chat
-            .map(m => {
-                return JSON.stringify(m)
-            })            
-            .join('\n');
-        stmBase = `[PREVIOUS_WORLD_INFO]\n${stmBase}\n[/PREVIOUS_WORLD_INFO]`;
-        stmBase = [stmBase, promptContent].join('\n\n');
+        let stmBase = eventData.chat;
+        stmBase.push({ role: 'system', content: promptContent });
         // Decide early if we will take over generation (and cancel default LLM immediately)
         const hasAnyStage = ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
             ((USER.tableBaseSetting.main_response_template || '').trim().length > 0);

@@ -150,11 +150,22 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         }
 
         // Preferred path: use TavernHelper when present
-        if (typeof window !== 'undefined' && window.TavernHelper?.generateRaw) {
-            const response = await window.TavernHelper.generateRaw({
-                ordered_prompts: messages,
-                should_stream: true,
-            });
+        //if (typeof window !== 'undefined' && window.TavernHelper?.generateRaw) {
+        //    const response = await window.TavernHelper.generateRaw({
+        //        ordered_prompts: messages,
+        //        should_stream: true,
+        //    });
+        //    loadingToast?.close();
+        //    return suspended ? 'suspended' : response;
+        //}
+        if (true) {
+            const response = await EDITOR.generateRaw(
+                messages,
+                '',
+                false,
+                false,
+                '' // no system prompt in this path
+            );
             loadingToast?.close();
             return suspended ? 'suspended' : response;
         }
