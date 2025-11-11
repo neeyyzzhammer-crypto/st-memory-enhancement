@@ -1563,7 +1563,14 @@ async function onChatCompletionPromptReady(eventData) {
 
         // Derive stmBase (FULL raw prompt to feed multi-stage):
         // Priority: augmented last user message; else concatenation of inserted system/user messages.
-        let stmBase = eventData.chat;
+        let stmBase = eventData.chat.map((m, idx) => {
+            const role = (m && typeof m.role === 'string') ? m.role : 'user';
+            const content = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
+            if (!content.trim()) {
+                console.warn(`[handleMainAPIRequest] message[${idx}] content empty; coerced to empty string.`);
+            }
+            return { role, content };
+        });
         stmBase.push({ role: 'system', content: promptContent });
         // Decide early if we will take over generation (and cancel default LLM immediately)
         const hasAnyStage = ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
