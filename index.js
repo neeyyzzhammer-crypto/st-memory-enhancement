@@ -701,12 +701,12 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     if (narrationTpl) {
         // Stage 1: Narration
         let narrationPrompt = [            
-            `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
+            `<PREVIOUS_SUMMARY>\n${previousSummary || '(none)'}\n</PREVIOUS_SUMMARY>`,
             narrationTpl
         ].filter(Boolean).join('\n\n'); 
         narrationPrompt=__applyNameMacros(narrationPrompt);
-        let narrationPromptA = __deepCopyChat(eventData.chat);
-        narrationPromptA.push({ role: 'system', content: narrationPrompt });
+        let narrationPromptA = __deepCopyChat(stmBase);
+        narrationPromptA.push({ role: 'system', content: `<narration_instructions>\n${narrationPrompt}\n</narration_instructions>` });
         applyReplaceInPlace(narrationPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         const rawNarration = await callStage(narrationPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
@@ -717,12 +717,12 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     let thinkingResp = '';
     if (thinkingTpl) {
         let thinkingPrompt = [
-            `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
+           `<PREVIOUS_SUMMARY>\n${previousSummary || '(none)'}\n</PREVIOUS_SUMMARY>`,
             expand(thinkingTpl, { narration: narrationResp })
         ].filter(Boolean).join('\n\n');
         thinkingPrompt = __applyNameMacros(thinkingPrompt);
-        let thinkingPromptA = __deepCopyChat(eventData.chat);
-        thinkingPromptA.push({ role: 'system', content: thinkingPrompt });
+        let thinkingPromptA = __deepCopyChat(stmBase);
+        thinkingPromptA.push({ role: 'system', content: `<thinking_instructions>\n${thinkingPrompt}\n</thinking_instructions>` });
         applyReplaceInPlace(thinkingPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         applyReplaceInPlace(thinkingPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         applyReplaceInPlace(thinkingPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');        
@@ -737,12 +737,12 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     if (mainTpl) {
         // Stage 3: Main Response (last stage shown to the user; triggers tableEdit if present)
         let mainPrompt = [
-            `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,
+            `<PREVIOUS_SUMMARY>\n${previousSummary || '(none)'}\n</PREVIOUS_SUMMARY>`,
             expand(mainTpl, { narration: narrationResp, thinking: thinkingResp })
         ].filter(Boolean).join('\n\n');
         mainPrompt = __applyNameMacros(mainPrompt);
-        let mainPromptA = __deepCopyChat(eventData.chat);
-        mainPromptA.push({ role: 'system', content: mainPrompt });
+        let mainPromptA = __deepCopyChat(stmBase);
+        mainPromptA.push({ role: 'system', content: `<main_instructions>\n${mainPrompt}\n</main_instructions>` });
         applyReplaceInPlace(mainPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         const rawMain = await callStage(mainPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawMain, 'main');
@@ -761,7 +761,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             : '';
 
         let summaryPrompt = [           
-            `[PREVIOUS_SUMMARY]\n${previousSummary || '(none)'}\n[/PREVIOUS_SUMMARY]`,            
+            `<PREVIOUS_SUMMARY>\n${previousSummary || '(none)'}\n</PREVIOUS_SUMMARY>`,
             expand(longTermSummaryTpl, {
                 narration: narrationResp,
                 thinking: thinkingResp,
@@ -769,8 +769,8 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             })
         ].filter(Boolean).join('\n\n');
         summaryPrompt = __applyNameMacros(summaryPrompt);
-        let summaryPromptA = __deepCopyChat(eventData.chat);
-        summaryPromptA.push({ role: 'system', content: summaryPrompt });
+        let summaryPromptA = __deepCopyChat(stmBase);
+        summaryPromptA.push({ role: 'system', content: `<summary_instructions>\n${summaryPrompt}\n</summary_instructions>` });
         applyReplaceInPlace(summaryPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         applyReplaceInPlace(summaryPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         applyReplaceInPlace(summaryPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');
@@ -1567,9 +1567,19 @@ async function onChatCompletionPromptReady(eventData) {
 
         // Derive stmBase (FULL raw prompt to feed multi-stage):
         // Priority: augmented last user message; else concatenation of inserted system/user messages.
-        eventData.chat.push({ role: 'system', content: promptContent });
         let stmBase = __deepCopyChat(eventData.chat);
-
+        stmBase.forEach(m => {
+            if (typeof m.content === 'string') m.content = `<previous_message>\n${m.content}\n</previous_message>`;
+        });
+        let lastUserIdx = -1;
+        for (let i = eventData.chat.length - 1; i >= 0; i--) {
+            if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
+        }
+        let lastContent = eventData.chat[lastUserIdx].content.replace(/<previous_message>/g, '');
+        lastContent = lastContent.replace(/<\/previous_message>/g, '');
+        lastContent = `<last_user_message>\n${lastContent}\n</last_user_message>`;
+        stmBase[lastUserIdx].content = lastContent;
+        stmBase.push({ role: 'system', content: `<memory>\n${promptContent}\n</memory>` });
         // Decide early if we will take over generation (and cancel default LLM immediately)
         const hasAnyStage = ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
             ((USER.tableBaseSetting.main_response_template || '').trim().length > 0);

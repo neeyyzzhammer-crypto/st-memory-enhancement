@@ -158,25 +158,7 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         }
 
         
-        // Preferred path: use TavernHelper when present
-        //if (typeof window !== 'undefined' && window.TavernHelper?.generateRaw) {
-        //    const response = await window.TavernHelper.generateRaw({
-        //        ordered_prompts: messages,
-        //        should_stream: true,
-        //    });
-        //    loadingToast?.close();
-        //    return suspended ? 'suspended' : response;
-        //}
-        if (true) {
-            const response = await TavernHelper.generateRaw({
-                ordered_prompts: systemPrompt,
-                should_stream: true,
-            });
-            loadingToast?.close();
-            return suspended ? 'suspended' : response;
-
-        }
-        
+       
         
         // Fallbacks (no TavernHelper):
         // 1) Single-message array (multistage uses this): call EDITOR.generateRaw directly
@@ -194,10 +176,9 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
 
         // 2) Multi-message array: flatten into one prompt and call EDITOR.generateRaw
         const flattened = messages
-            .map(m => {
-                const role = m?.role ?? 'user';
+            .map(m => {                
                 const content = typeof m?.content === 'string' ? m.content : '';
-                return `[${role.toUpperCase()}]\n${content}`;
+                return `\n${content}`;
             })
             .join('\n\n');
         const response = await EDITOR.generateRaw(
