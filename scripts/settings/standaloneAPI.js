@@ -139,11 +139,9 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         // and separately into role/content objects for openai fallback.
         const normalizedObjects = rawMessages.map((m, idx) => {
             const role = (m && typeof m.role === 'string') ? m.role : 'user';
-            const content = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
-            if (!content.trim()) {
-                console.warn(`[handleMainAPIRequest] message[${idx}] content empty; coerced to empty string.`);
-            }
-            return { role, content };
+            const content2 = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
+            
+            return { content: content2 };
         });
         // UI toast
         createLoadingToast(true, isSilent).then((r) => {
