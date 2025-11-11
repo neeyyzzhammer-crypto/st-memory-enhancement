@@ -174,7 +174,20 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         //    return suspended ? 'suspended' : response;
 
         //}
-
+        let mes2 = [
+            { role: 'system', content: 'You are a helpful assistant.' },
+            { role: 'user', content: 'Hello there!' },
+            { role: 'assistant', content: 'Hi! How can I help?' },
+        ];
+        const response2 = await EDITOR.generateRaw(
+            mes2,
+            '',
+            false,
+            false,
+            '' // no system prompt in this path
+        );
+        loadingToast?.close();
+        return suspended ? 'suspended' : response2;
         // Fallbacks (no TavernHelper):
         // 1) Single-message array (multistage uses this): call EDITOR.generateRaw directly
         if (messages.length === 1 && typeof messages[0]?.content === 'string') {
