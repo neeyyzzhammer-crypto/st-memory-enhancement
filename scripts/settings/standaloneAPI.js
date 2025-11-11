@@ -156,8 +156,6 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
                 }
             });
         }
-        console.log('主API请求的多消息数组:', normalizedMessages); // Log the actual array
-       
         // Preferred path: use TavernHelper when present
         //if (typeof window !== 'undefined' && window.TavernHelper?.generateRaw) {
         //    const response = await window.TavernHelper.generateRaw({
