@@ -133,7 +133,7 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
     let suspended = false;
 
     if (Array.isArray(systemPrompt)) {
-        const rawMessages = systemPrompt;
+        const messages = systemPrompt;
 
         // Normalize into array of strings for TavernHelper (step-style),
         // and separately into role/content objects for openai fallback.
@@ -192,7 +192,7 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         }
 
         // 2) Multi-message array: flatten into one prompt and call EDITOR.generateRaw
-        const flattened = systemPrompt
+        const flattened = messages
             .map(m => {
                 const role = m?.role ?? 'user';
                 const content = typeof m?.content === 'string' ? m.content : '';
