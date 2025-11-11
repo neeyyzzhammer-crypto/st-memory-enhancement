@@ -137,12 +137,12 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
 
         // Normalize into array of strings for TavernHelper (step-style),
         // and separately into role/content objects for openai fallback.
-        const normalizedObjects = rawMessages.map((m, idx) => {
-            const role = (m && typeof m.role === 'string') ? m.role : 'user';
-            const content2 = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
+        //const normalizedObjects = rawMessages.map((m, idx) => {
+        //    const role = (m && typeof m.role === 'string') ? m.role : 'user';
+        //    const content2 = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
             
-            return { content: content2 };
-        });
+        //    return { content: content2 };
+        //});
         // UI toast
         createLoadingToast(true, isSilent).then((r) => {
             if (loadingToast) loadingToast.close();
@@ -167,15 +167,15 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         //    loadingToast?.close();
         //    return suspended ? 'suspended' : response;
         //}
-        if (true) {
-            const response = await TavernHelper.generateRaw({
-                ordered_prompts: normalizedObjects,
-                should_stream: true,
-            });
-            loadingToast?.close();
-            return suspended ? 'suspended' : response;
+        //if (true) {
+        //    const response = await TavernHelper.generateRaw({
+        //        ordered_prompts: normalizedObjects,
+        //        should_stream: true,
+        //    });
+        //    loadingToast?.close();
+        //    return suspended ? 'suspended' : response;
 
-        }
+        //}
 
         // Fallbacks (no TavernHelper):
         // 1) Single-message array (multistage uses this): call EDITOR.generateRaw directly
@@ -192,9 +192,9 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         }
 
         // 2) Multi-message array: flatten into one prompt and call EDITOR.generateRaw
-        const flattened = messages
+        const flattened = systemPrompt
             .map(m => {
-                const role = m?.role ?? 'user';
+                const role = m?.role ?? 'system';
                 const content = typeof m?.content === 'string' ? m.content : '';
                 return `[${role.toUpperCase()}]\n${content}`;
             })
