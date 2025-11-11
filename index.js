@@ -707,7 +707,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         narrationPrompt=__applyNameMacros(narrationPrompt);
         let narrationPromptA = __deepCopyChat(eventData.chat);
         narrationPromptA.push({ role: 'system', content: narrationPrompt });
-        narrationPromptA = replaceInMessages(narrationPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+        applyReplaceInPlace(narrationPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         const rawNarration = await callStage(narrationPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
         narrationResp = text;
@@ -723,9 +723,9 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         thinkingPrompt = __applyNameMacros(thinkingPrompt);
         let thinkingPromptA = __deepCopyChat(eventData.chat);
         thinkingPromptA.push({ role: 'system', content: thinkingPrompt });
-        thinkingPromptA = replaceInMessages(thinkingPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
-        thinkingPromptA = replaceInMessages(thinkingPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
-        thinkingPromptA = replaceInMessages(thinkingPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');        
+        applyReplaceInPlace(thinkingPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
+        applyReplaceInPlace(thinkingPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+        applyReplaceInPlace(thinkingPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');        
         const rawThinking = await callStage(thinkingPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawThinking, 'thinking');
         thinkingResp = text;
@@ -743,7 +743,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         mainPrompt = __applyNameMacros(mainPrompt);
         let mainPromptA = __deepCopyChat(eventData.chat);
         mainPromptA.push({ role: 'system', content: mainPrompt });
-        mainPromptA = replaceInMessages(mainPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
+        applyReplaceInPlace(mainPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         const rawMain = await callStage(mainPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawMain, 'main');
         mainResp = text;
@@ -771,9 +771,9 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         summaryPrompt = __applyNameMacros(summaryPrompt);
         let summaryPromptA = __deepCopyChat(eventData.chat);
         summaryPromptA.push({ role: 'system', content: summaryPrompt });
-        summaryPromptA = replaceInMessages(summaryPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
-        summaryPromptA = replaceInMessages(summaryPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
-        summaryPromptA = replaceInMessages(summaryPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');
+        applyReplaceInPlace(summaryPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
+        applyReplaceInPlace(summaryPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+        applyReplaceInPlace(summaryPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');
         const rawSummary = await callStage(summaryPromptA);
         const { text: summaryResp } = __sanitizeDeepSeekOutput(rawSummary, 'main');
         updateLongTermSummary({
