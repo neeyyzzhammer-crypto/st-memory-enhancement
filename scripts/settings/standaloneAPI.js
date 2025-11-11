@@ -194,7 +194,7 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         // 2) Multi-message array: flatten into one prompt and call EDITOR.generateRaw
         const flattened = systemPrompt
             .map(m => {
-                const role = m?.role ?? 'system';
+                const role = m?.role ?? 'user';
                 const content = typeof m?.content === 'string' ? m.content : '';
                 return `[${role.toUpperCase()}]\n${content}`;
             })
