@@ -137,7 +137,7 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
 
         // Normalize into array of strings for TavernHelper (step-style),
         // and separately into role/content objects for openai fallback.
-        const normalizedObjects = rawMessages.map((m, idx) => {
+        const normalizedObjects = messages.map((m, idx) => {
             const role = (m && typeof m.role === 'string') ? m.role : 'user';
             const content2 = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
             
