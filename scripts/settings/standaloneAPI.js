@@ -145,9 +145,6 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
             }
             return { role, content };
         });
-
-        const orderedPrompts = normalizedObjects.map(o => o.content);
-
         // UI toast
         createLoadingToast(true, isSilent).then((r) => {
             if (loadingToast) loadingToast.close();
@@ -174,7 +171,7 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         //}
         if (true) {
             const response = await TavernHelper.generateRaw({
-                ordered_prompts: orderedPrompts,
+                ordered_prompts: normalizedObjects,
                 should_stream: true,
             });
             loadingToast?.close();
