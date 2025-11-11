@@ -705,7 +705,8 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             narrationTpl
         ].filter(Boolean).join('\n\n'); 
         narrationPrompt=__applyNameMacros(narrationPrompt);
-        let narrationPromptA = [...stmBase, { role: 'system', content: narrationPrompt }];
+        let narrationPromptA = __deepCopyChat(eventData.chat);
+        narrationPromptA.push({ role: 'system', content: narrationPrompt });
         narrationPromptA = replaceInMessages(narrationPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         const rawNarration = await callStage(narrationPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
@@ -720,7 +721,8 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             expand(thinkingTpl, { narration: narrationResp })
         ].filter(Boolean).join('\n\n');
         thinkingPrompt = __applyNameMacros(thinkingPrompt);
-        let thinkingPromptA = [...stmBase, { role: 'system', content: thinkingPrompt }];
+        let thinkingPromptA = __deepCopyChat(eventData.chat);
+        thinkingPromptA.push({ role: 'system', content: thinkingPrompt });
         thinkingPromptA = replaceInMessages(thinkingPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         thinkingPromptA = replaceInMessages(thinkingPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         thinkingPromptA = replaceInMessages(thinkingPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');        
@@ -739,7 +741,8 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             expand(mainTpl, { narration: narrationResp, thinking: thinkingResp })
         ].filter(Boolean).join('\n\n');
         mainPrompt = __applyNameMacros(mainPrompt);
-        let mainPromptA = [...stmBase, { role: 'system', content: mainPrompt }];
+        let mainPromptA = __deepCopyChat(eventData.chat);
+        mainPromptA.push({ role: 'system', content: mainPrompt });
         mainPromptA = replaceInMessages(mainPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         const rawMain = await callStage(mainPromptA);
         const { text } = __sanitizeDeepSeekOutput(rawMain, 'main');
@@ -766,7 +769,8 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             })
         ].filter(Boolean).join('\n\n');
         summaryPrompt = __applyNameMacros(summaryPrompt);
-        let summaryPromptA = [...stmBase, { role: 'system', content: summaryPrompt }];
+        let summaryPromptA = __deepCopyChat(eventData.chat);
+        summaryPromptA.push({ role: 'system', content: summaryPrompt });
         summaryPromptA = replaceInMessages(summaryPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         summaryPromptA = replaceInMessages(summaryPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         summaryPromptA = replaceInMessages(summaryPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');
@@ -1563,8 +1567,9 @@ async function onChatCompletionPromptReady(eventData) {
 
         // Derive stmBase (FULL raw prompt to feed multi-stage):
         // Priority: augmented last user message; else concatenation of inserted system/user messages.
-        let stmBase = eventData.chat;
-        stmBase.push({ role: 'system', content: promptContent });
+        eventData.chat.push({ role: 'system', content: promptContent });
+        let stmBase = __deepCopyChat(eventData.chat);
+
         // Decide early if we will take over generation (and cancel default LLM immediately)
         const hasAnyStage = ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
             ((USER.tableBaseSetting.main_response_template || '').trim().length > 0);
@@ -1588,6 +1593,82 @@ async function onChatCompletionPromptReady(eventData) {
         EDITOR.error(`记忆插件：表格数据注入失败\n原因：`, error.message, error);
     }
     console.log("STM 完成并作为基底，后续多阶段或旧逻辑处理完成", eventData.chat);
+}
+
+
+/**
+ * Deep copy chat array (messages can include nested objects, Maps/Sets, Dates, etc.).
+ * - Prefer structuredClone when available.
+ * - Fallback supports circular refs and common built-in types.
+ * - Functions, DOM Nodes, and Window are returned by reference.
+ */
+function __deepCopyChat(chat) {
+    try {
+        if (typeof structuredClone === 'function') {
+            return structuredClone(chat);
+        }
+    } catch (_) { /* ignore and use fallback */ }
+    return __deepCloneFallback(chat);
+}
+
+function __deepCloneFallback(value, seen = new WeakMap()) {
+    if (value === null || typeof value !== 'object') return value;
+    if (seen.has(value)) return seen.get(value);
+
+    // DOM/Window guards (keep references)
+    if (typeof Node !== 'undefined' && value instanceof Node) return value;
+    if (typeof Window !== 'undefined' && value instanceof Window) return value;
+
+    // Dates, RegExps
+    if (value instanceof Date) return new Date(value.getTime());
+    if (value instanceof RegExp) return new RegExp(value.source, value.flags);
+
+    // Map / Set
+    if (value instanceof Map) {
+        const m = new Map();
+        seen.set(value, m);
+        value.forEach((v, k) => m.set(__deepCloneFallback(k, seen), __deepCloneFallback(v, seen)));
+        return m;
+    }
+    if (value instanceof Set) {
+        const s = new Set();
+        seen.set(value, s);
+        value.forEach(v => s.add(__deepCloneFallback(v, seen)));
+        return s;
+    }
+
+    // ArrayBuffer / TypedArrays / DataView
+    if (value instanceof ArrayBuffer) return value.slice(0);
+    if (ArrayBuffer.isView(value)) {
+        const ctor = value.constructor;
+        return new ctor(value);
+    }
+    if (value instanceof DataView) {
+        return new DataView(value.buffer.slice(0), value.byteOffset, value.byteLength);
+    }
+
+    // Arrays
+    if (Array.isArray(value)) {
+        const arr = new Array(value.length);
+        seen.set(value, arr);
+        for (let i = 0; i < value.length; i++) {
+            arr[i] = __deepCloneFallback(value[i], seen);
+        }
+        return arr;
+    }
+
+    // Plain/Object-like (preserve prototype)
+    const proto = Object.getPrototypeOf(value);
+    const obj = Object.create(proto);
+    seen.set(value, obj);
+
+    for (const key of Object.keys(value)) {
+        obj[key] = __deepCloneFallback(value[key], seen);
+    }
+    for (const sym of Object.getOwnPropertySymbols(value)) {
+        obj[sym] = __deepCloneFallback(value[sym], seen);
+    }
+    return obj;
 }
 /**
  * 宏获取提示词

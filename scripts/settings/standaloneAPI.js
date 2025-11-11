@@ -157,11 +157,7 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
             });
         }
 
-        let mes2 = [
-            { role: 'system', content: 'You are a helpful assistant.' },
-            { role: 'user', content: 'Hello there!' },
-            { role: 'assistant', content: 'Hi! How can I help?' },
-        ];
+        
         // Preferred path: use TavernHelper when present
         //if (typeof window !== 'undefined' && window.TavernHelper?.generateRaw) {
         //    const response = await window.TavernHelper.generateRaw({
@@ -173,7 +169,7 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         //}
         if (true) {
             const response = await TavernHelper.generateRaw({
-                ordered_prompts: mes2,
+                ordered_prompts: systemPrompt,
                 should_stream: true,
             });
             loadingToast?.close();
