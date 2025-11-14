@@ -679,7 +679,43 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
             return r || '';
         }
     }
+    // NEW: unified retry wrapper for each stage (up to 5 attempts)
+    async function callStageWithRetry(stageName, payload, sanitizeStage) {
+        const maxAttempts = 5;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+           
+            let raw = '';
+            try {
+                raw = await callStage(payload);
+            } catch (e) {
+                console.warn(`[MultiStage:${stageName}] Exception on attempt ${attempt}:`, e);
+                raw = '';
+            }
 
+           
+
+            const { text, stripped } = __sanitizeDeepSeekOutput(raw, sanitizeStage);
+            if (text && text.trim()) {
+                if (attempt > 1) {
+                    console.log(`[MultiStage:${stageName}] Succeeded on retry attempt ${attempt}`);
+                }
+                return { text, stripped };
+            }
+
+            if (attempt < maxAttempts) {
+                console.warn(`[MultiStage:${stageName}] Empty/failed response (attempt ${attempt}); retrying...`);
+                // Small backoff (linear) without blocking abort
+                await new Promise(r => {
+                    const timeout = 250 * attempt;
+                    let t = setTimeout(() => r(), timeout);
+                    
+                });
+            } else {
+                console.error(`[MultiStage:${stageName}] Failed after ${maxAttempts} attempts; giving up.`);
+            }
+        }
+        return { text: '', stripped: '' };
+    }
     // Create and render shell using official API
     const shell = __createAssistantShellMessage();
     ctx.chat.push(shell); // keep index in sync with chat
@@ -708,8 +744,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         let narrationPromptA = __deepCopyChat(stmBase);
         narrationPromptA.push({ role: 'system', content: `<narration_instructions>\n${narrationPrompt}\n</narration_instructions>` });
         applyReplaceInPlace(narrationPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
-        const rawNarration = await callStage(narrationPromptA);
-        const { text } = __sanitizeDeepSeekOutput(rawNarration, 'narration');
+        const { text } = await callStageWithRetry('narration', narrationPromptA, 'narration');
         narrationResp = text;
         appendBlockToAssistant(baseAssistantIndex, 'narration', narrationResp || '(no narration)', { triggerTableEdit: false });
     }
@@ -726,8 +761,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         applyReplaceInPlace(thinkingPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         applyReplaceInPlace(thinkingPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         applyReplaceInPlace(thinkingPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');        
-        const rawThinking = await callStage(thinkingPromptA);
-        const { text } = __sanitizeDeepSeekOutput(rawThinking, 'thinking');
+        const { text } = await callStageWithRetry('thinking', thinkingPromptA, 'thinking');
         thinkingResp = text;
         appendBlockToAssistant(baseAssistantIndex, 'critical_thinking', thinkingResp, { triggerTableEdit: false });
 
@@ -744,8 +778,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         let mainPromptA = __deepCopyChat(stmBase);
         mainPromptA.push({ role: 'system', content: `<main_instructions>\n${mainPrompt}\n</main_instructions>` });
         applyReplaceInPlace(mainPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
-        const rawMain = await callStage(mainPromptA);
-        const { text } = __sanitizeDeepSeekOutput(rawMain, 'main');
+        const { text } = await callStageWithRetry('main', mainPromptA, 'main');
         mainResp = text;
         appendBlockToAssistant(baseAssistantIndex, 'main', mainResp, { triggerTableEdit: true });
     }
@@ -774,8 +807,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
         applyReplaceInPlace(summaryPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         applyReplaceInPlace(summaryPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         applyReplaceInPlace(summaryPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');
-        const rawSummary = await callStage(summaryPromptA);
-        const { text: summaryResp } = __sanitizeDeepSeekOutput(rawSummary, 'main');
+        const { text: summaryResp } = await callStageWithRetry('summary', summaryPromptA, 'main');
         updateLongTermSummary({
             narration: narrationResp,
             thinking: thinkingResp,
