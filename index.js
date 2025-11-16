@@ -436,7 +436,7 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
     const ctx = USER.getContext();
     const { eventSource, event_types, messageFormatting } = ctx;
     const S = USER.tableBaseSetting || {};
-    let cleanedContent = content.replace(/```/gi, '');
+    let cleanedContent = (blockLabel !== 'main') ? content.replace(/```/gi, '') : content;
     const msg = ctx.chat[msgIndex];
     if (!msg) return;
 
