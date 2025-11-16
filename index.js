@@ -442,8 +442,8 @@ function appendBlockToAssistant(msgIndex, blockLabel, content, opts = {}) {
 
     // Build block
     const block = (blockLabel === 'main')
-        ? `<${blockLabel}>\n\n${content}\n\n</${blockLabel}>`
-        : `<${blockLabel}>\n\`\`\`\n${content}\n\`\`\`\n</${blockLabel}>`;
+        ? `<${blockLabel}>\n\n${cleanedContent}\n\n</${blockLabel}>`
+        : `<${blockLabel}>\n\`\`\`\n${cleanedContent}\n\`\`\`\n</${blockLabel}>`;
 
     // Append
     const prev = msg.mes || '';
