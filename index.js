@@ -183,10 +183,102 @@ function __getBranchData(branchId) {
     return store.branches[branchId];
 }
 
-function getLongTermSummary() {
-    const branchId = __getActiveBranchId();
-    return __getBranchData(branchId).summary || '';
+
+// --- PATCH: Branch-aware long term summary retrieval (avoid copying post-branch summary) ---
+
+/**
+ * Locate the pivot (branch creation) message index:
+ * Uses reference piece if available, else current chat piece.
+ * Falls back to full chat end when not found.
+ */
+function __getBranchPivotIndex() {
+    try {
+        const chat = USER.getContext()?.chat || [];
+        const piece =
+            (BASE.getReferencePiece && BASE.getReferencePiece()) ||
+            (USER.getChatPiece && USER.getChatPiece()?.piece);
+        if (!piece || !piece.uid) return chat.length - 1;
+        const idx = chat.indexOf(piece);
+        return idx >= 0 ? idx : chat.length - 1;
+    } catch {
+        return (USER.getContext()?.chat || []).length - 1;
+    }
 }
+
+/**
+ * Scan backward from pivot index to find the nearest assistant/user message
+ * carrying lt_summary in its extra field.
+ * @param {number} pivotIdx
+ * @returns {string}
+ */
+function __computeSummaryUpToIndex(pivotIdx) {
+    try {
+        const chat = USER.getContext()?.chat || [];
+        const end = Math.min(pivotIdx, chat.length - 1);
+        for (let i = end; i >= 0; i--) {
+            const m = chat[i];
+            const s = m?.extra?.lt_summary;
+            if (typeof s === 'string' && s.trim()) return s.trim();
+        }
+    } catch { }
+    return '';
+}
+
+/**
+ * Recompute latest summary limited to branch pivot (used after deletions or branch switch).
+ * If pivotOverride provided, restrict scan to that index; else derive pivot.
+ */
+function __recomputeLatestSummaryFromChat(pivotOverride) {
+    try {
+        const branchId = __getActiveBranchId();
+        const data = __getBranchData(branchId);
+        const pivotIdx = Number.isFinite(pivotOverride) ? pivotOverride : __getBranchPivotIndex();
+        const fresh = __computeSummaryUpToIndex(pivotIdx);
+        data.summary = fresh;
+        try { USER.getContext().saveChat?.(); } catch { }
+    } catch (e) {
+        console.warn('[LongTermSummary] recompute (branch-aware) failed:', e);
+    }
+}
+
+/**
+ * Branch-aware getter:
+ * Instead of always returning the last summary in the entire chat,
+ * restrict lookup to the branch pivot index to avoid copying summaries
+ * that were generated after the branching point.
+ */
+function getLongTermSummary() {
+    try {
+        const branchId = __getActiveBranchId();
+        const data = __getBranchData(branchId);
+
+        // If we already have a stored summary that originated at/within this branch's pivot,
+        // validate it quickly; if not, recompute within pivot range.
+        const pivotIdx = __getBranchPivotIndex();
+        const validated = __computeSummaryUpToIndex(pivotIdx);
+
+        if (validated && validated === data.summary) {
+            return data.summary; // Stored matches latest within branch scope
+        }
+
+        if (validated && validated !== data.summary) {
+            // Update branch store to keep it consistent with pivot-bounded reality
+            data.summary = validated;
+            try { USER.getContext().saveChat?.(); } catch { }
+            return validated;
+        }
+
+        // No embedded summary found up to pivot; fall back to stored (may be empty) or ''
+        return data.summary || '';
+    } catch {
+        return '';
+    }
+}
+
+//function getLongTermSummary() {
+//    const branchId = __getActiveBranchId();
+//    return __getBranchData(branchId).summary || '';
+//}
 
 function updateLongTermSummary({ narration, thinking, main, summary, userMessage, assistantIndex }) {
     const branchId = __getActiveBranchId();
