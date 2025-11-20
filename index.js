@@ -35,9 +35,7 @@ const editErrorInfo = {
 window.__stm_ms_state = {
     inProgress: false,
     consumed: false,
-    controller: null,
-    // NEW: data prepared at prompt-ready, consumed after default LLM finishes
-    pendingMultiStage: null,
+    controller: null    
 };
 
 function __stm_markConsumed() {
@@ -1601,7 +1599,7 @@ async function onMessageReceived(chat_id) {
         lastContent = `<last_user_message>\n${lastContent}\n</last_user_message>`;
         stmBase[lastUserIdx].content = lastContent;
     }
-
+    const st = window.__stm_ms_state;
     // NEW: guard against re-entrancy caused by our own CHARACTER_MESSAGE_RENDERED emissions
     if (st.inProgress) return;
 
@@ -1610,8 +1608,7 @@ async function onMessageReceived(chat_id) {
         await __runPostDefaultMultiStage(stmBase, idx);
     } catch (e) {
         console.warn('[PostMultiStage] failed:', e);
-    } finally {
-        st.pendingMultiStage = null;
+    } finally {        
         st.inProgress = false;
     }
     return;
