@@ -1602,34 +1602,19 @@ async function onMessageReceived(chat_id) {
         stmBase[lastUserIdx].content = lastContent;
     }
 
-    const hasAnyStage =
-        ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
-        ((USER.tableBaseSetting.main_response_template || '').trim().length > 0) ||
-        ((USER.tableBaseSetting.long_term_summary_template || '').trim().length > 0);
-
-    if (USER.tableBaseSetting.step_by_step !== true && hasAnyStage) {
-        window.__stm_ms_state.pendingMultiStage = { stmBase, ts: Date.now() };
-    } else {
-        window.__stm_ms_state.pendingMultiStage = null;
-    }
-    const st = window.__stm_ms_state || {};
-
     // NEW: guard against re-entrancy caused by our own CHARACTER_MESSAGE_RENDERED emissions
     if (st.inProgress) return;
 
-    // Only consume the pending work prepared at prompt time; do NOT re-arm here
-    if (st.pendingMultiStage && st.pendingMultiStage.stmBase) {
-        try {
-            st.inProgress = true;
-            await __runPostDefaultMultiStage(st.pendingMultiStage.stmBase, idx);
-        } catch (e) {
-            console.warn('[PostMultiStage] failed:', e);
-        } finally {
-            st.pendingMultiStage = null;
-            st.inProgress = false;
-        }
-        return;
+    try {
+        st.inProgress = true;
+        await __runPostDefaultMultiStage(stmBase, idx);
+    } catch (e) {
+        console.warn('[PostMultiStage] failed:', e);
+    } finally {
+        st.pendingMultiStage = null;
+        st.inProgress = false;
     }
+    return;
 
     // Legacy path
     if (USER.tableBaseSetting.step_by_step === true && USER.getContext().chat.length > 2) {
