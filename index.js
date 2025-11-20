@@ -1787,6 +1787,7 @@ function getLatestAssistantCriticalThinkingSection() {
     return '';
 }
 const __applyNameMacros = (s) => {
+    const { userName, charName } = getCurrentChatNames();
     return s
         .replace(/{{user}}/gi, userName)
         .replace(/{{char}}/gi, charName);
@@ -1794,6 +1795,8 @@ const __applyNameMacros = (s) => {
 // PATCH: enhance thinking data to support multi previous critical thinking sections (CRM setting)
 function initThinkingData(eventData) {
     try {
+        const S = USER.tableBaseSetting || {};
+        const enableThinking = S.enable_thinking_stage !== false;
         let thinkingTpl = enableThinking ? (S.thinking_template || '').trim() : '';
         //if (!tpl || typeof tpl !== 'string') return '';
         // Critical thinking memory (CRM) count
