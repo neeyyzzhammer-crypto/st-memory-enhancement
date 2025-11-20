@@ -31,11 +31,13 @@ const editErrorInfo = {
     functionNameError: false,
 };
 
-// === Multi-Stage Cancellation & Duplicate LLM Suppression ===
+// Extend multi-stage state (add pendingMultiStage)
 window.__stm_ms_state = {
     inProgress: false,
     consumed: false,
     controller: null,
+    // NEW: data prepared at prompt-ready, consumed after default LLM finishes
+    pendingMultiStage: null,
 };
 
 function __stm_markConsumed() {
@@ -710,172 +712,155 @@ const applyReplaceInPlace = (msgs, regex, replacement = '') =>
     msgs.forEach(m => {
         if (typeof m.content === 'string') m.content = m.content.replace(regex, replacement);
     });
-async function __runIncrementalMultiStageResponse(eventData, stmBase) {
+
+
+// NEW: Inject only thinking content into the prompt we send to the LLM (no cancellation)
+function __applyThinkingInjection(eventData) {
+    try {
+        const S = USER.tableBaseSetting || {};
+        const enableThinking = S.enable_thinking_stage !== false;
+        const thinkingTpl = enableThinking ? (S.thinking_template || '').trim() : '';
+        if (!enableThinking || !thinkingTpl) return;
+
+        // Build thinking content (existing helper preserves previous thinking CRM)
+        const thinkingContent = initThinkingData(eventData);
+        if (!thinkingContent || !thinkingContent.trim()) return;
+
+        // Prefer prepending to last user message; fallback to insert as system
+        let lastUserIdx = -1;
+        for (let i = eventData.chat.length - 1; i >= 0; i--) {
+            if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
+        }
+        applyReplaceInPlace(eventData.chat, /<_beat>[\s\S]*?<\/_beat>/gi, '');
+        applyReplaceInPlace(eventData.chat, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+        applyReplaceInPlace(eventData.chat, /<_sex>[\s\S]*?<\/_sex>/gi, '');
+        const wrapped = `<thinking_instructions>\n${thinkingContent.trim()}\n</thinking_instructions>`;
+
+        if (lastUserIdx !== -1) {
+            const prev = eventData.chat[lastUserIdx].content || '';
+            eventData.chat[lastUserIdx].content = `${wrapped}\n\n${prev}`;
+        } else {
+            const role = getMesRole() || 'system';
+            eventData.chat.push({ role, content: wrapped });
+        }
+    } catch (e) {
+        console.warn('[ThinkingInjection] Failed to inject thinking content:', e);
+    }
+}
+
+// NEW: Post-default multi-stage runner that updates ONLY the last assistant message
+async function __runPostDefaultMultiStage(stmBase, assistantIndex) {
     const S = USER.tableBaseSetting || {};
-    
     const enableNarration = S.enable_narration_stage !== false;
-    const enableThinking = S.enable_thinking_stage !== false;
     const enableMain = S.enable_main_stage !== false;
     const enableSummary = S.enable_long_term_summary_stage !== false;
+
     let narrationTpl = enableNarration ? (S.narration_template || '').trim() : '';
-    let thinkingTpl = enableThinking ? (S.thinking_template || '').trim() : '';
     let mainTpl = enableMain ? (S.main_response_template || '').trim() : '';
     let longTermSummaryTpl = enableSummary ? (S.long_term_summary_template || '').trim() : '';
 
-
     const previousSummary = getLongTermSummary();
     const { userName, charName } = getCurrentChatNames();
-    const __applyNameMacros = (s) => {
-        return s
-        .replace(/{{user}}/gi, userName)       
-        .replace(/{{char}}/gi, charName);        
-    };
-    const expand = (tpl, ctx) => tpl
+    applyReplaceInPlace(stmBase, /<thinking_instructions>[\s\S]*?<\/thinking_instructions>/gi, ''); 
+   
+    const expand = (tpl, ctx) => (tpl || '')
         .replace(/{{narration}}/g, ctx.narration || '')
         .replace(/{{thinking}}/g, ctx.thinking || '')
         .replace(/{{main}}/g, ctx.main || '')
         .replace(/{{previous_summary}}/g, ctx.previous_summary || '')
         .replace(/{{summary}}/g, ctx.summary || '');
 
-    const useMainAPI = S.use_main_api === true;
-    const ctx = USER.getContext();
-    const { addOneMessage, eventSource, event_types, saveChat } = ctx;
-
-    // Stage caller with robust fallback: Custom -> Main
-    async function callStage(payload) {
-        const messages = payload;
+    // Stage caller (clone of existing robust fallback)
+    async function callStage(messages) {
+        const useMainAPI = S.use_main_api === true;
         const tryMain = async () => {
             try {
-                const raw = await handleMainAPIRequest(messages, null, true); // silent
+                const raw = await handleMainAPIRequest(messages, null, true);
                 return (raw === 'suspended' || typeof raw !== 'string') ? '' : raw.trim();
-            } catch {
-                return '';
-            }
+            } catch { return ''; }
         };
         const tryCustom = async () => {
             try {
-                const raw = await handleCustomAPIRequest(messages, null, true, true); // step-by-step=true, silent=true
+                const raw = await handleCustomAPIRequest(messages, null, true, true);
                 return (raw === 'suspended' || typeof raw !== 'string') ? '' : raw.trim();
-            } catch {
-                return '';
-            }
+            } catch { return ''; }
         };
-
         if (useMainAPI) {
-            let r = await tryMain();
-            if (!r) r = await tryCustom();
-            return r || '';
+            let r = await tryMain(); if (!r) r = await tryCustom(); return r || '';
         } else {
-            let r = await tryCustom();
-            if (!r) r = await tryMain();
-            return r || '';
+            let r = await tryCustom(); if (!r) r = await tryMain(); return r || '';
         }
     }
-    // NEW: unified retry wrapper for each stage (up to 5 attempts)
+
     async function callStageWithRetry(stageName, payload, sanitizeStage) {
         const maxAttempts = 5;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-           
             let raw = '';
-            try {
-                raw = await callStage(payload);
-            } catch (e) {
-                console.warn(`[MultiStage:${stageName}] Exception on attempt ${attempt}:`, e);
+            try { raw = await callStage(payload); } catch (e) {
+                console.warn(`[PostMultiStage:${stageName}] Exception on attempt ${attempt}:`, e);
                 raw = '';
             }
-
-           
-
-            const { text, stripped } = __sanitizeDeepSeekOutput(raw, sanitizeStage);
+            const { text } = __sanitizeDeepSeekOutput(raw, sanitizeStage);
             if (text && text.trim()) {
-                if (attempt > 1) {
-                    console.log(`[MultiStage:${stageName}] Succeeded on retry attempt ${attempt}`);
-                }
-                return { text, stripped };
+                if (attempt > 1) console.log(`[PostMultiStage:${stageName}] Succeeded on retry attempt ${attempt}`);
+                return { text, stripped: '' };
             }
-
             if (attempt < maxAttempts) {
-                console.warn(`[MultiStage:${stageName}] Empty/failed response (attempt ${attempt}); retrying...`);
-                // Small backoff (linear) without blocking abort
-                await new Promise(r => {
-                    const timeout = 250 * attempt;
-                    let t = setTimeout(() => r(), timeout);
-                    
-                });
+                console.warn(`[PostMultiStage:${stageName}] Empty/failed response (attempt ${attempt}); retrying...`);
+                await new Promise(r => setTimeout(r, 250 * attempt));
             } else {
-                console.error(`[MultiStage:${stageName}] Failed after ${maxAttempts} attempts; giving up.`);
+                console.error(`[PostMultiStage:${stageName}] Failed after ${maxAttempts} attempts; giving up.`);
             }
         }
         return { text: '', stripped: '' };
     }
-    // Create and render shell using official API
-    const shell = __createAssistantShellMessage();
-    ctx.chat.push(shell); // keep index in sync with chat
-    addOneMessage(shell, { scroll: true });
-    const baseAssistantIndex = ctx.chat.length - 1;
-    try {
-        // Emit a "sent/received" pair so renderers that depend on these update correctly
-        eventSource.emit(event_types.MESSAGE_SENT, baseAssistantIndex);
-        eventSource.emit(event_types.MESSAGE_RECEIVED, baseAssistantIndex);
-        eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, baseAssistantIndex);
-    } catch { }
-    //let loreAppendix = '';// await __buildLorebookAppendix(eventData, narrationLoreSource);
-    //let loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
-    //loreBlock = __applyNameMacros(loreBlock);
-    window.SillyTavern.abortGeneration();
-    //stmBase = replaceInMessages(stmBase, /<BEAT>/g, '');
-    //stmBase = replaceInMessages(stmBase, /<SEX>/g, '');
-    let narrationResp = '';
-    if (narrationTpl) {
-        // Stage 1: Narration
-        let narrationPrompt = [            
-            `<PREVIOUS_SUMMARY>\n${previousSummary || '(none)'}\n</PREVIOUS_SUMMARY>`,
-            narrationTpl
-        ].filter(Boolean).join('\n\n'); 
-        narrationPrompt=__applyNameMacros(narrationPrompt);
-        let narrationPromptA = __deepCopyChat(stmBase);
-        narrationPromptA.push({ role: 'system', content: `<narration_instructions>\n${narrationPrompt}\n</narration_instructions>` });
-        applyReplaceInPlace(narrationPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
-        const { text } = await callStageWithRetry('narration', narrationPromptA, 'narration');
-        narrationResp = text;
-        appendBlockToAssistant(baseAssistantIndex, 'narration', narrationResp || '(no narration)', { triggerTableEdit: false });
-    }
-    // Stage 2: Thinking (optional)
-    let thinkingResp = '';
-    if (thinkingTpl) {
-        let thinkingPrompt = [
-           `<PREVIOUS_SUMMARY>\n${previousSummary || '(none)'}\n</PREVIOUS_SUMMARY>`,
-            expand(thinkingTpl, { narration: narrationResp })
-        ].filter(Boolean).join('\n\n');
-        thinkingPrompt = __applyNameMacros(thinkingPrompt);
-        let thinkingPromptA = __deepCopyChat(stmBase);
-        thinkingPromptA.push({ role: 'system', content: `<thinking_instructions>\n${thinkingPrompt}\n</thinking_instructions>` });
-        applyReplaceInPlace(thinkingPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
-        applyReplaceInPlace(thinkingPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
-        applyReplaceInPlace(thinkingPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');        
-        const { text } = await callStageWithRetry('thinking', thinkingPromptA, 'thinking');
-        thinkingResp = text;
-        appendBlockToAssistant(baseAssistantIndex, 'critical_thinking', thinkingResp, { triggerTableEdit: false });
 
-    }
+    // We already have a default LLM response at assistantIndex; append our stages onto that message
+    const ctx = USER.getContext();
 
+    // MAIN
     let mainResp = '';
     if (mainTpl) {
-        // Stage 3: Main Response (last stage shown to the user; triggers tableEdit if present)
         let mainPrompt = [
             `<PREVIOUS_SUMMARY>\n${previousSummary || '(none)'}\n</PREVIOUS_SUMMARY>`,
-            expand(mainTpl, { narration: narrationResp, thinking: thinkingResp })
+            expand(mainTpl, { thinking: '' }) // thinking is now injected upstream; no separate stage output here
         ].filter(Boolean).join('\n\n');
         mainPrompt = __applyNameMacros(mainPrompt);
+
         let mainPromptA = __deepCopyChat(stmBase);
         mainPromptA.push({ role: 'system', content: `<main_instructions>\n${mainPrompt}\n</main_instructions>` });
+
         applyReplaceInPlace(mainPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         const { text } = await callStageWithRetry('main', mainPromptA, 'main');
         mainResp = text;
-        appendBlockToAssistant(baseAssistantIndex, 'main', mainResp, { triggerTableEdit: true });
+        if (mainResp) {
+            appendBlockToAssistant(assistantIndex, 'main', mainResp, { triggerTableEdit: true });
+        }
     }
 
-    // Stage 4: Long Term Summary (do NOT append to UI; update store only)
+    // NARRATION
+    let narrationResp = '';
+    if (narrationTpl) {
+        let narrationPrompt = [
+            `<PREVIOUS_SUMMARY>\n${previousSummary || '(none)'}\n</PREVIOUS_SUMMARY>`,
+            expand(narrationTpl, {
+                narration: '',
+                thinking: '',
+                main: __stripTableEditBlocks(mainResp)
+            })
+        ].filter(Boolean).join('\n\n');
+        narrationPrompt = __applyNameMacros(narrationPrompt);
+
+        let narrationPromptA = __deepCopyChat(stmBase);
+        narrationPromptA.push({ role: 'system', content: `<narration_instructions>\n${narrationPrompt}\n</narration_instructions>` });
+
+        applyReplaceInPlace(narrationPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+        const { text } = await callStageWithRetry('narration', narrationPromptA, 'narration');
+        narrationResp = text;
+        appendBlockToAssistant(assistantIndex, 'narration', narrationResp || '(no narration)', { triggerTableEdit: false });
+    }
+
+    // SUMMARY (store only)
     if (longTermSummaryTpl) {
         const ui = __getLastUserMessageIndex();
         const chatArr = USER.getContext()?.chat || [];
@@ -885,35 +870,36 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
                 : (typeof chatArr[ui]?.mes === 'string' ? chatArr[ui].mes : ''))
             : '';
 
-        let summaryPrompt = [           
+        let summaryPrompt = [
             `<PREVIOUS_SUMMARY>\n${previousSummary || '(none)'}\n</PREVIOUS_SUMMARY>`,
             expand(longTermSummaryTpl, {
                 narration: narrationResp,
-                thinking: thinkingResp,
+                thinking: '', // no separate thinking stage output here
                 main: __stripTableEditBlocks(mainResp)
             })
         ].filter(Boolean).join('\n\n');
         summaryPrompt = __applyNameMacros(summaryPrompt);
+
         let summaryPromptA = __deepCopyChat(stmBase);
         summaryPromptA.push({ role: 'system', content: `<summary_instructions>\n${summaryPrompt}\n</summary_instructions>` });
+
         applyReplaceInPlace(summaryPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         applyReplaceInPlace(summaryPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
         applyReplaceInPlace(summaryPromptA, /<_sex>[\s\S]*?<\/_sex>/gi, '');
+
         const { text: summaryResp } = await callStageWithRetry('summary', summaryPromptA, 'main');
         updateLongTermSummary({
             narration: narrationResp,
-            thinking: thinkingResp,
+            thinking: '',
             main: mainResp,
             summary: summaryResp,
             userMessage: lastUserMessage,
-            assistantIndex: baseAssistantIndex
+            assistantIndex
         });
     }
 
-    try { await saveChat?.(); } catch { }
-    try { updateSheetsView(baseAssistantIndex); } catch { }
-
-    return true;
+    try { await ctx.saveChat?.(); } catch { }
+    try { await updateSheetsView(assistantIndex); } catch { }
 }
 // Build RAG "past events" text for current user message
 async function __buildPastEventsFromRag(eventData) {
@@ -1592,6 +1578,7 @@ function __buildThinkingPromptOverride(latestSection) {
 // 6) fallback to legacy injection when multi-stage not active
 // PATCH: Reorder logic so STM pipeline (thinking + template injection) runs FIRST.
 // Multi-stage now receives the full, already-injected "raw prompt" (stmBase).
+// REWRITE onChatCompletionPromptReady: inject thinking only, arm post-default multi-stage, do NOT cancel default LLM
 async function onChatCompletionPromptReady(eventData) {
     try {
         if (eventData.dryRun === true ||
@@ -1601,96 +1588,25 @@ async function onChatCompletionPromptReady(eventData) {
             return;
         }
 
-        // Refresh RAG embedding for latest user message (non-destructive)
+        // RAG vectorize latest user (best effort)
         try {
             if (USER.tableBaseSetting.enable_rag && window.ST_RAG?.vectorizeMessageByIndex) {
                 const chatArr = USER.getContext()?.chat || [];
                 const lastIdx = chatArr.length - 1;
-                if (lastIdx >= 0) {
-                    await window.ST_RAG.vectorizeMessageByIndex(lastIdx);
-                }
+                if (lastIdx >= 0) await window.ST_RAG.vectorizeMessageByIndex(lastIdx);
             }
-        } catch (e) {
-            console.warn('[RAG] vectorize on prompt-ready failed:', e);
-        }
+        } catch (e) { console.warn('[RAG] vectorize on prompt-ready failed:', e); }
 
-        // Short-term memory config (needed for STM assembly)
-        //const stm = parseInt(
-        //    USER.tableBaseSetting?.short_term_memory ??
-        //    $('#dataTable_short_term_memory').val() ??
-        //    '0',
-        //    10
-        //) || 0;
+        // Build memory for our later multi-stage only (not injected into the default call)
+        const promptContent = await initTableDataWithRag(eventData); // table + long term summary
+        eventData.chat.push({ role: 'system', content: `<memory>\n${promptContent}\n</memory>` });
+        // Inject THINKING into outgoing chat for default LLM
+        __applyThinkingInjection(eventData);
 
-        // Build components of STM pipeline
-        const promptContent = await initTableDataWithRag(eventData); // processed message_template (tableData + long_term_memory)
-        const thinkingContent = initThinkingData(eventData);         // thinking_template with previous critical thinking memory
-
-        //const role = getMesRole();
-        //let lastUserIdx = -1;
-        //for (let i = eventData.chat.length - 1; i >= 0; i--) {
-        //    if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
-        //}
-
-        //// Apply original STM injection logic to eventData.chat (this constructs the "raw prompt")
-        //let insertedIndices = [];
-        //if (stm === 0) {
-        //    // Collapse context to a single (augmented) last user message
-        //    if (lastUserIdx !== -1) {
-        //        const merged = [thinkingContent, promptContent]
-        //            .filter(s => typeof s === 'string' && s.trim().length > 0)
-        //            .join('\n\n');
-        //        if (merged) {
-        //            const prev = eventData.chat[lastUserIdx].content || '';
-        //            eventData.chat[lastUserIdx].content = `${merged}\n\n${prev}`;
-        //        }
-        //        // For stmBase we use this augmented user message only
-        //    } else if (promptContent || thinkingContent) {
-        //        // No user message present, inject as a standalone role block
-        //        const standalone = [thinkingContent, promptContent]
-        //            .filter(s => s && s.trim()).join('\n\n');
-        //        if (standalone) {
-        //            eventData.chat.push({ role, content: standalone });
-        //            insertedIndices.push(eventData.chat.length - 1);
-        //        }
-        //    }
-        //} else {
-        //    // Keep a window (legacy behavior) but still prepend injection to latest user or insert near tail
-        //    const hasThinking = thinkingContent && thinkingContent.trim();
-        //    const hasPrompt = promptContent && promptContent.trim();
-        //    if (lastUserIdx !== -1 && (hasThinking || hasPrompt)) {
-        //        const prev = eventData.chat[lastUserIdx].content || '';
-        //        const parts = [];
-        //        if (hasThinking) parts.push(thinkingContent);
-        //        if (hasPrompt) parts.push(promptContent);
-        //        eventData.chat[lastUserIdx].content = `${parts.join('\n\n')}\n\n${prev}`;
-        //    } else if (hasThinking || hasPrompt) {
-        //        const inserts = [];
-        //        if (hasThinking) inserts.push({ role, content: thinkingContent });
-        //        if (hasPrompt) inserts.push({ role, content: promptContent });
-        //        const deepVal = Number.isFinite(USER.tableBaseSetting.deep) ? USER.tableBaseSetting.deep : 1;
-        //        const insertAt = (deepVal <= 0)
-        //            ? Math.max(eventData.chat.length - 1, 0)
-        //            : Math.max(eventData.chat.length - deepVal, 0);
-        //        eventData.chat.splice(insertAt, 0, ...inserts);
-        //        for (let k = 0; k < inserts.length; k++) insertedIndices.push(insertAt + k);
-        //    }
-
-        //    // Trim visible slice for sending (previous code trimmed eventData.chat itself).
-        //    const total = eventData.chat.length;
-        //    const keepCount = Math.min(total, stm * 2);
-        //    if (stm >= 0 && keepCount < total) {
-        //        eventData.chat = eventData.chat.slice(total - keepCount);
-        //        // Adjust lastUserIdx after slice
-        //        lastUserIdx = -1;
-        //        for (let i = eventData.chat.length - 1; i >= 0; i--) {
-        //            if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
-        //        }
-        //    }
-        //}
-
-        // Derive stmBase (FULL raw prompt to feed multi-stage):
-        // Priority: augmented last user message; else concatenation of inserted system/user messages.
+        // Prepare stmBase for our post-default multi-stage call (same assembly as before)
+        
+        
+        
         let stmBase = __deepCopyChat(eventData.chat);
         stmBase.forEach(m => {
             if (typeof m.content === 'string') m.content = `<previous_message>\n${m.content}\n</previous_message>`;
@@ -1699,34 +1615,33 @@ async function onChatCompletionPromptReady(eventData) {
         for (let i = eventData.chat.length - 1; i >= 0; i--) {
             if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
         }
-        let lastContent = eventData.chat[lastUserIdx].content.replace(/<previous_message>/g, '');
-        lastContent = lastContent.replace(/<\/previous_message>/g, '');
-        lastContent = `<last_user_message>\n${lastContent}\n</last_user_message>`;
-        stmBase[lastUserIdx].content = lastContent;
-        stmBase.push({ role: 'system', content: `<memory>\n${promptContent}\n</memory>` });
-        // Decide early if we will take over generation (and cancel default LLM immediately)
-        const hasAnyStage = ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
-            ((USER.tableBaseSetting.main_response_template || '').trim().length > 0);
-        const canHandle = USER.tableBaseSetting.step_by_step !== true && hasAnyStage;
-
-        if (canHandle) {
-            // Cancel default generation BEFORE any async work to avoid the extra call
-            __cancelDefaultLLM(eventData);
-            eventData.handledByMemoryEnhancement = true;
-
-            const handled = await __runIncrementalMultiStageResponse(eventData, stmBase);
-            // Even if handled=false, we keep default cancelled to prevent double LLM calls
-            return;
+        if (lastUserIdx !== -1) {
+            let lastContent = eventData.chat[lastUserIdx].content.replace(/<previous_message>/g, '');
+            lastContent = lastContent.replace(/<\/previous_message>/g, '');
+            lastContent = `<last_user_message>\n${lastContent}\n</last_user_message>`;
+            stmBase[lastUserIdx].content = lastContent;
         }
 
+        // Arm post-default multi-stage only if any stage is enabled
+        const hasAnyStage = ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
+            ((USER.tableBaseSetting.main_response_template || '').trim().length > 0) ||
+            ((USER.tableBaseSetting.long_term_summary_template || '').trim().length > 0);
 
-        // Fallback (legacy single-shot path) if multi-stage disabled or not configured.
-        // Nothing further needed: STM already injected. We just update sheets view.
-        updateSheetsView();
+        if (USER.tableBaseSetting.step_by_step !== true && hasAnyStage) {
+            window.__stm_ms_state.pendingMultiStage = {
+                stmBase,
+                ts: Date.now()
+            };
+        } else {
+            window.__stm_ms_state.pendingMultiStage = null;
+        }
+
+        // DO NOT cancel default LLM; allow it to proceed
+        // Sheets will be updated after post-default multi-stage completes
     } catch (error) {
         EDITOR.error(`记忆插件：表格数据注入失败\n原因：`, error.message, error);
     }
-    console.log("STM 完成并作为基底，后续多阶段或旧逻辑处理完成", eventData.chat);
+    console.log("STM thinking injected; default call continues; post-default multistage armed (if enabled).", eventData.chat);
 }
 
 
@@ -1871,11 +1786,15 @@ function getLatestAssistantCriticalThinkingSection() {
     }
     return '';
 }
-
+const __applyNameMacros = (s) => {
+    return s
+        .replace(/{{user}}/gi, userName)
+        .replace(/{{char}}/gi, charName);
+};
 // PATCH: enhance thinking data to support multi previous critical thinking sections (CRM setting)
 function initThinkingData(eventData) {
     try {
-        let tpl = USER.tableBaseSetting?.thinking_template || '';
+        let thinkingTpl = enableThinking ? (S.thinking_template || '').trim() : '';
         //if (!tpl || typeof tpl !== 'string') return '';
         // Critical thinking memory (CRM) count
         const crmCount = parseInt(
@@ -1892,8 +1811,13 @@ function initThinkingData(eventData) {
             const sections = __collectLastCriticalThinkingSections(fullChat, crmCount);
             previousCombined = sections.join('\n');
         }
-        // Always inject template, but substitute empty string if crmCount === 0
-        return replaceUserTag(tpl.replace('<previous_thinking>', previousCombined));
+        if (thinkingTpl) {
+            let thinkingPrompt = [
+                `<previous_thoughts>\n${previousCombined || '(none)'}\n</previous_thoughts>`
+            ].filter(Boolean).join('\n\n');
+            thinkingTpl = __applyNameMacros(thinkingPrompt); 
+        }
+        return thinkingTpl;
     } catch (error) {
         EDITOR.error('记忆插件：思考提示词注入失败\n原因：', error.message, error);
         return '';
@@ -1923,7 +1847,7 @@ async function onMessageEdited(this_edit_mes_id) {
 }
 
 
-// Replace the body of onMessageReceived with this normalized version
+// Update onMessageReceived to trigger post-default multi-stage on the just-produced assistant message
 async function onMessageReceived(chat_id) {
     if (USER.tableBaseSetting.isExtensionAble === false) return;
 
@@ -1946,6 +1870,22 @@ async function onMessageReceived(chat_id) {
         return;
     }
 
+    // If we armed post-default multistage at prompt-ready, run it now against this assistant message
+    const st = window.__stm_ms_state || {};
+    if (st.pendingMultiStage && st.pendingMultiStage.stmBase) {
+        try {
+            await __runPostDefaultMultiStage(st.pendingMultiStage.stmBase, idx);
+        } catch (e) {
+            console.warn('[PostMultiStage] failed:', e);
+        } finally {
+            // Consume once
+            st.pendingMultiStage = null;
+        }
+        // We already appended main/narration blocks (main triggered tableEdit); avoid duplicate parsing below
+        return;
+    }
+
+    // Legacy: Two-step or direct table edit handling
     if (USER.tableBaseSetting.step_by_step === true && USER.getContext().chat.length > 2) {
         TableTwoStepSummary("auto");
     } else {
