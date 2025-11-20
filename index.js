@@ -1566,6 +1566,87 @@ function __buildThinkingPromptOverride(latestSection) {
     }
 }
 
+
+// 3) Prevent re-entrancy and duplicate arming in onMessageReceived
+async function onMessageReceived(chat_id) {
+    if (USER.tableBaseSetting.isExtensionAble === false) return;
+
+    const idx = __normalizeMessageIndex(chat_id);
+    if (!Number.isFinite(idx) || idx < 0) return;
+
+    try {
+        if (USER.tableBaseSetting.enable_rag && window.ST_RAG?.vectorizeMessageByIndex) {
+            await window.ST_RAG.vectorizeMessageByIndex(idx);
+        }
+    } catch (e) {
+        console.warn('[RAG] vectorize on assistant message failed:', e);
+    }
+
+    const msg = USER.getContext().chat[idx];
+    if (!msg || msg.is_user === true || typeof msg.mes !== 'string') {
+        updateSheetsView();
+        return;
+    }
+    // NEW: prepare stmBase and arm pendingMultiStage here (once)
+    let stmBase = __deepCopyChat(eventData.chat);
+    stmBase.forEach(m => {
+        if (typeof m.content === 'string') m.content = `<previous_message>\n${m.content}\n</previous_message>`;
+    });
+    let lastUserIdx = -1;
+    for (let i = eventData.chat.length - 1; i >= 0; i--) {
+        if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
+    }
+    if (lastUserIdx !== -1) {
+        let lastContent = eventData.chat[lastUserIdx].content.replace(/<previous_message>/g, '').replace(/<\/previous_message>/g, '');
+        lastContent = `<last_user_message>\n${lastContent}\n</last_user_message>`;
+        stmBase[lastUserIdx].content = lastContent;
+    }
+
+    const hasAnyStage =
+        ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
+        ((USER.tableBaseSetting.main_response_template || '').trim().length > 0) ||
+        ((USER.tableBaseSetting.long_term_summary_template || '').trim().length > 0);
+
+    if (USER.tableBaseSetting.step_by_step !== true && hasAnyStage) {
+        window.__stm_ms_state.pendingMultiStage = { stmBase, ts: Date.now() };
+    } else {
+        window.__stm_ms_state.pendingMultiStage = null;
+    }
+    const st = window.__stm_ms_state || {};
+
+    // NEW: guard against re-entrancy caused by our own CHARACTER_MESSAGE_RENDERED emissions
+    if (st.inProgress) return;
+
+    // Only consume the pending work prepared at prompt time; do NOT re-arm here
+    if (st.pendingMultiStage && st.pendingMultiStage.stmBase) {
+        try {
+            st.inProgress = true;
+            await __runPostDefaultMultiStage(st.pendingMultiStage.stmBase, idx);
+        } catch (e) {
+            console.warn('[PostMultiStage] failed:', e);
+        } finally {
+            st.pendingMultiStage = null;
+            st.inProgress = false;
+        }
+        return;
+    }
+
+    // Legacy path
+    if (USER.tableBaseSetting.step_by_step === true && USER.getContext().chat.length > 2) {
+        TableTwoStepSummary("auto");
+    } else {
+        if (USER.tableBaseSetting.isAiWriteTable === false) return;
+        try {
+            handleEditStrInMessage(msg, idx);
+        } catch (error) {
+            EDITOR.error("记忆插件：表格自动更改失败\n原因：", error.message, error);
+        }
+    }
+    updateSheetsView();
+}
+
+
+
 // REWRITE onChatCompletionPromptReady flow:
 // 1) gate/early-outs
 // 2) ensure RAG for latest user (optional)
@@ -1813,139 +1894,6 @@ async function onMessageEdited(this_edit_mes_id) {
         EDITOR.error("记忆插件：表格编辑失败\n原因：", error.message, error);
     }
     updateSheetsView();
-}
-// 3) Prevent re-entrancy and duplicate arming in onMessageReceived
-async function onMessageReceived(chat_id) {
-    if (USER.tableBaseSetting.isExtensionAble === false) return;
-
-    const idx = __normalizeMessageIndex(chat_id);
-    if (!Number.isFinite(idx) || idx < 0) return;
-
-    try {
-        if (USER.tableBaseSetting.enable_rag && window.ST_RAG?.vectorizeMessageByIndex) {
-            await window.ST_RAG.vectorizeMessageByIndex(idx);
-        }
-    } catch (e) {
-        console.warn('[RAG] vectorize on assistant message failed:', e);
-    }
-
-    const msg = USER.getContext().chat[idx];
-    if (!msg || msg.is_user === true || typeof msg.mes !== 'string') {
-        updateSheetsView();
-        return;
-    }
-    // NEW: prepare stmBase and arm pendingMultiStage here (once)
-    let stmBase = __deepCopyChat(eventData.chat);
-    stmBase.forEach(m => {
-        if (typeof m.content === 'string') m.content = `<previous_message>\n${m.content}\n</previous_message>`;
-    });
-    let lastUserIdx = -1;
-    for (let i = eventData.chat.length - 1; i >= 0; i--) {
-        if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
-    }
-    if (lastUserIdx !== -1) {
-        let lastContent = eventData.chat[lastUserIdx].content.replace(/<previous_message>/g, '').replace(/<\/previous_message>/g, '');
-        lastContent = `<last_user_message>\n${lastContent}\n</last_user_message>`;
-        stmBase[lastUserIdx].content = lastContent;
-    }
-
-    const hasAnyStage =
-        ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
-        ((USER.tableBaseSetting.main_response_template || '').trim().length > 0) ||
-        ((USER.tableBaseSetting.long_term_summary_template || '').trim().length > 0);
-
-    if (USER.tableBaseSetting.step_by_step !== true && hasAnyStage) {
-        window.__stm_ms_state.pendingMultiStage = { stmBase, ts: Date.now() };
-    } else {
-        window.__stm_ms_state.pendingMultiStage = null;
-    }
-    const st = window.__stm_ms_state || {};
-
-    // NEW: guard against re-entrancy caused by our own CHARACTER_MESSAGE_RENDERED emissions
-    if (st.inProgress) return;
-
-    // Only consume the pending work prepared at prompt time; do NOT re-arm here
-    if (st.pendingMultiStage && st.pendingMultiStage.stmBase) {
-        try {
-            st.inProgress = true;
-            await __runPostDefaultMultiStage(st.pendingMultiStage.stmBase, idx);
-        } catch (e) {
-            console.warn('[PostMultiStage] failed:', e);
-        } finally {
-            st.pendingMultiStage = null;
-            st.inProgress = false;
-        }
-        return;
-    }
-
-    // Legacy path
-    if (USER.tableBaseSetting.step_by_step === true && USER.getContext().chat.length > 2) {
-        TableTwoStepSummary("auto");
-    } else {
-        if (USER.tableBaseSetting.isAiWriteTable === false) return;
-        try {
-            handleEditStrInMessage(msg, idx);
-        } catch (error) {
-            EDITOR.error("记忆插件：表格自动更改失败\n原因：", error.message, error);
-        }
-    }
-    updateSheetsView();
-}
-
-// 2) Arm multistage ONCE at prompt time (not inside onMessageReceived)
-async function onChatCompletionPromptReady(eventData) {
-    try {
-        if (eventData.dryRun === true ||
-            USER.tableBaseSetting.isExtensionAble === false ||
-            USER.tableBaseSetting.isAiReadTable === false ||
-            USER.tableBaseSetting.injection_mode === "injection_off") {
-            return;
-        }
-
-        try {
-            if (USER.tableBaseSetting.enable_rag && window.ST_RAG?.vectorizeMessageByIndex) {
-                const chatArr = USER.getContext()?.chat || [];
-                const lastIdx = chatArr.length - 1;
-                if (lastIdx >= 0) await window.ST_RAG.vectorizeMessageByIndex(lastIdx);
-            }
-        } catch (e) { console.warn('[RAG] vectorize on prompt-ready failed:', e); }
-
-        const promptContent = await initTableDataWithRag(eventData);
-        eventData.chat.push({ role: 'system', content: `<memory>\n${promptContent}\n</memory>` });
-
-        __applyThinkingInjection(eventData);
-
-        // NEW: prepare stmBase and arm pendingMultiStage here (once)
-        let stmBase = __deepCopyChat(eventData.chat);
-        stmBase.forEach(m => {
-            if (typeof m.content === 'string') m.content = `<previous_message>\n${m.content}\n</previous_message>`;
-        });
-        let lastUserIdx = -1;
-        for (let i = eventData.chat.length - 1; i >= 0; i--) {
-            if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
-        }
-        if (lastUserIdx !== -1) {
-            let lastContent = eventData.chat[lastUserIdx].content.replace(/<previous_message>/g, '').replace(/<\/previous_message>/g, '');
-            lastContent = `<last_user_message>\n${lastContent}\n</last_user_message>`;
-            stmBase[lastUserIdx].content = lastContent;
-        }
-
-        const hasAnyStage =
-            ((USER.tableBaseSetting.narration_template || '').trim().length > 0) ||
-            ((USER.tableBaseSetting.main_response_template || '').trim().length > 0) ||
-            ((USER.tableBaseSetting.long_term_summary_template || '').trim().length > 0);
-
-        if (USER.tableBaseSetting.step_by_step !== true && hasAnyStage) {
-            window.__stm_ms_state.pendingMultiStage = { stmBase, ts: Date.now() };
-        } else {
-            window.__stm_ms_state.pendingMultiStage = null;
-        }
-
-        // Let default LLM proceed
-    } catch (error) {
-        EDITOR.error(`记忆插件：表格数据注入失败\n原因：`, error.message, error);
-    }
-    console.log("STM thinking injected; default call continues; post-default multistage armed (if enabled).", eventData.chat);
 }
 
 /**
