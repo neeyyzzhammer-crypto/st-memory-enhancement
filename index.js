@@ -1565,6 +1565,15 @@ function __buildThinkingPromptOverride(latestSection) {
         return '';
     }
 }
+function __hasAnyPriorUserMessage(idx) {
+    try {
+        const chat = USER.getContext()?.chat || [];
+        for (let i = 0; i < idx; i++) {
+            if (chat[i]?.is_user === true) return true;
+        }
+    } catch { }
+    return false;
+}
 
 
 // 3) Prevent re-entrancy and duplicate arming in onMessageReceived
@@ -1590,7 +1599,10 @@ async function onMessageReceived(chat_id) {
 
     const st = window.__stm_ms_state;
     st.pendingMultiStage.stmBase.push(msg);
-    
+    if (!st.pendingMultiStage || !__hasAnyPriorUserMessage(idx)) {
+        updateSheetsView();
+        return;
+    }
     // NEW: guard against re-entrancy caused by our own CHARACTER_MESSAGE_RENDERED emissions
     if (st.inProgress) return;
     
