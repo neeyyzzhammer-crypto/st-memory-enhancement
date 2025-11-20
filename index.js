@@ -156,27 +156,27 @@ function __getLastUserMessageIndex() {
     return -1;
 }
 
-function __recomputeLatestSummaryFromChat() {
-    try {
-        const branchId = __getActiveBranchId();
-        const data = __getBranchData(branchId);
-        const chat = USER.getContext()?.chat || [];
-        for (let i = chat.length - 1; i >= 0; i--) {
-            const m = chat[i];
-            const s = m?.extra?.lt_summary;
-            if (typeof s === 'string' && s.trim()) {
-                data.summary = s;
-                try { USER.getContext().saveChat?.(); } catch {}
-                return;
-            }
-        }
-        // nothing left carrying a summary
-        data.summary = '';
-        try { USER.getContext().saveChat?.(); } catch {}
-    } catch (e) {
-        console.warn('[LongTermSummary] recompute from chat failed:', e);
-    }
-}
+//function __recomputeLatestSummaryFromChat() {
+//    try {
+//        const branchId = __getActiveBranchId();
+//        const data = __getBranchData(branchId);
+//        const chat = USER.getContext()?.chat || [];
+//        for (let i = chat.length - 1; i >= 0; i--) {
+//            const m = chat[i];
+//            const s = m?.extra?.lt_summary;
+//            if (typeof s === 'string' && s.trim()) {
+//                data.summary = s;
+//                try { USER.getContext().saveChat?.(); } catch {}
+//                return;
+//            }
+//        }
+//        // nothing left carrying a summary
+//        data.summary = '';
+//        try { USER.getContext().saveChat?.(); } catch {}
+//    } catch (e) {
+//        console.warn('[LongTermSummary] recompute from chat failed:', e);
+//    }
+//}
 function __getBranchData(branchId) {
     const store = __getSummaryStore();
     store.branches[branchId] = store.branches[branchId] || { summary: '', history: [] };
