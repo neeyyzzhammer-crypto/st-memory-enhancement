@@ -35,7 +35,7 @@ const editErrorInfo = {
 window.__stm_ms_state = {
     inProgress: false,
     consumed: false,
-    controller: null    
+    controller: null
 };
 
 function __stm_markConsumed() {
@@ -1585,24 +1585,24 @@ async function onMessageReceived(chat_id) {
         updateSheetsView();
         return;
     }
-    // NEW: prepare stmBase and arm pendingMultiStage here (once)
-    let stmBase = __deepCopyChat(eventData.chat);
+    
+    const st = window.__stm_ms_state;
+    // NEW: guard against re-entrancy caused by our own CHARACTER_MESSAGE_RENDERED emissions
+    if (st.inProgress) return;
+    const chat = USER.getContext()?.chat || [];
+    let stmBase = __deepCopyChat(chat);
     stmBase.forEach(m => {
         if (typeof m.content === 'string') m.content = `<previous_message>\n${m.content}\n</previous_message>`;
     });
     let lastUserIdx = -1;
-    for (let i = eventData.chat.length - 1; i >= 0; i--) {
-        if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
+    for (let i = stmBase.length - 1; i >= 0; i--) {
+        if (stmBase[i]?.role === 'user') { lastUserIdx = i; break; }
     }
     if (lastUserIdx !== -1) {
-        let lastContent = eventData.chat[lastUserIdx].content.replace(/<previous_message>/g, '').replace(/<\/previous_message>/g, '');
+        let lastContent = stmBase[lastUserIdx].content.replace(/<previous_message>/g, '').replace(/<\/previous_message>/g, '');
         lastContent = `<last_user_message>\n${lastContent}\n</last_user_message>`;
         stmBase[lastUserIdx].content = lastContent;
-    }
-    const st = window.__stm_ms_state;
-    // NEW: guard against re-entrancy caused by our own CHARACTER_MESSAGE_RENDERED emissions
-    if (st.inProgress) return;
-
+    }    
     try {
         st.inProgress = true;
         await __runPostDefaultMultiStage(stmBase, idx);
@@ -1661,9 +1661,7 @@ async function onChatCompletionPromptReady(eventData) {
         const promptContent = await initTableDataWithRag(eventData); // table + long term summary
         eventData.chat.push({ role: 'system', content: `<memory>\n${promptContent}\n</memory>` });
         // Inject THINKING into outgoing chat for default LLM
-        __applyThinkingInjection(eventData);
-
-        // DO NOT cancel default LLM; allow it to proceed
+        __applyThinkingInjection(eventData);     
         // Sheets will be updated after post-default multi-stage completes
         updateSheetsView();
     } catch (error) {
