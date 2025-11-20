@@ -1601,6 +1601,7 @@ async function onMessageReceived(chat_id) {
         console.warn('[PostMultiStage] failed:', e);
     } finally {        
         st.inProgress = false;
+        applyShortTermMemoryWindow(); // ensure STM window applied after multi-stage
     }
     return;
 
