@@ -822,7 +822,7 @@ async function __runIncrementalMultiStageResponse(eventData, stmBase) {
     //let loreAppendix = '';// await __buildLorebookAppendix(eventData, narrationLoreSource);
     //let loreBlock = loreAppendix ? `[LOREBOOK]\n${loreAppendix}\n[/LOREBOOK]` : '';
     //loreBlock = __applyNameMacros(loreBlock);
-
+    window.SillyTavern.abortGeneration();
     //stmBase = replaceInMessages(stmBase, /<BEAT>/g, '');
     //stmBase = replaceInMessages(stmBase, /<SEX>/g, '');
     let narrationResp = '';
