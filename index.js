@@ -1587,8 +1587,10 @@ async function onMessageReceived(chat_id) {
         updateSheetsView();
         return;
     }
-    st.pendingMultiStage.stmBase.push(msg);
+
     const st = window.__stm_ms_state;
+    st.pendingMultiStage.stmBase.push(msg);
+    
     // NEW: guard against re-entrancy caused by our own CHARACTER_MESSAGE_RENDERED emissions
     if (st.inProgress) return;
     
