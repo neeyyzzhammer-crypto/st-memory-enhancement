@@ -1816,7 +1816,8 @@ function initThinkingData(eventData) {
         }
         if (thinkingTpl) {
             let thinkingPrompt = [
-                `<previous_thoughts>\n${previousCombined || '(none)'}\n</previous_thoughts>`
+                `<previous_thoughts>\n${previousCombined || '(none)'}\n</previous_thoughts>`,
+                thinkingTpl
             ].filter(Boolean).join('\n\n');
             thinkingTpl = __applyNameMacros(thinkingPrompt); 
         }
