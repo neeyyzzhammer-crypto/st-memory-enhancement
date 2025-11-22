@@ -830,7 +830,7 @@ async function __runPostDefaultMultiStage(stmBase, assistantIndex) {
         let mainPromptA = __deepCopyChat(stmBase);
         mainPromptA.push({ role: 'system', content: `<main_instructions>\n${mainPrompt}\n</main_instructions>` });
 
-        applyReplaceInPlace(mainPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
+        //applyReplaceInPlace(mainPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
         const { text } = await callStageWithRetry('main', mainPromptA, 'main');
         mainResp = text;
         if (mainResp) {
@@ -1664,10 +1664,12 @@ async function onChatCompletionPromptReady(eventData) {
         // Build memory for our later multi-stage only (not injected into the default call)
         const promptContent = await initTableDataWithRag(eventData); // table + long term summary
         eventData.chat.push({ role: 'system', content: `<memory>\n${promptContent}\n</memory>` });
+
+        // NEW: prepare stmBase (before thinking sanitizes chat) and arm pendingMultiStage here (once)
+        let stmBase = __deepCopyChat(eventData.chat);
         // Inject THINKING into outgoing chat for default LLM
         __applyThinkingInjection(eventData);     
-        // NEW: prepare stmBase and arm pendingMultiStage here (once)
-        let stmBase = __deepCopyChat(eventData.chat);
+        
         stmBase.forEach(m => {
             if (typeof m.content === 'string') m.content = `<previous_message>\n${m.content}\n</previous_message>`;
         });
