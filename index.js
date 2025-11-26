@@ -749,7 +749,7 @@ function __applyThinkingInjection(eventData) {
 }
 
 // NEW: Post-default multi-stage runner that updates ONLY the last assistant message
-async function __runPostDefaultMultiStage(stmBase, assistantIndex) {
+async function __runPostDefaultMultiStage(stmBase, thinking_content, assistantIndex) {
     const S = USER.tableBaseSetting || {};
     const enableNarration = S.enable_narration_stage !== false;
     const enableMain = S.enable_main_stage !== false;
@@ -822,8 +822,10 @@ async function __runPostDefaultMultiStage(stmBase, assistantIndex) {
     // MAIN
     let mainResp = '';
     if (mainTpl) {
-        let mainPrompt = [
-            mainTpl // thinking is now injected upstream; no separate stage output here
+        let mainPrompt = [            
+            expand(mainTpl, {                
+                thinking: thinking_content               
+            })
         ].filter(Boolean).join('\n\n');
         mainPrompt = __applyNameMacros(mainPrompt);
 
@@ -843,7 +845,8 @@ async function __runPostDefaultMultiStage(stmBase, assistantIndex) {
     if (narrationTpl) {
         let narrationPrompt = [
             expand(narrationTpl, {                
-                main: __stripTableEditBlocks(mainResp)
+                main: __stripTableEditBlocks(mainResp),
+                thinking: thinking_content    
             })
         ].filter(Boolean).join('\n\n');
         narrationPrompt = __applyNameMacros(narrationPrompt);
@@ -871,7 +874,7 @@ async function __runPostDefaultMultiStage(stmBase, assistantIndex) {
             `<PREVIOUS_SUMMARY>\n${previousSummary || '(none)'}\n</PREVIOUS_SUMMARY>`,
             expand(longTermSummaryTpl, {
                 narration: narrationResp,
-                thinking: '', // no separate thinking stage output here
+                thinking: thinking_content, 
                 main: __stripTableEditBlocks(mainResp)
             })
         ].filter(Boolean).join('\n\n');
@@ -1598,8 +1601,8 @@ async function onMessageReceived(chat_id) {
     }
 
     const st = window.__stm_ms_state;
-    const assistantContent = `<previous_message>\n${msg.mes}\n</previous_message>`;
-    st.pendingMultiStage.stmBase.push({ role: 'assistant', content: assistantContent });
+    const assistantContent = msg.mes;
+    //st.pendingMultiStage.stmBase.push({ role: 'assistant', content: assistantContent });
     if (!st.pendingMultiStage || !__hasAnyPriorUserMessage(idx)) {
         updateSheetsView();
         return;
@@ -1609,7 +1612,7 @@ async function onMessageReceived(chat_id) {
     
     try {
         st.inProgress = true;
-        await __runPostDefaultMultiStage(st.pendingMultiStage.stmBase, idx);
+        await __runPostDefaultMultiStage(st.pendingMultiStage.stmBase, assistantContent, idx);
     } catch (e) {
         console.warn('[PostMultiStage] failed:', e);
     } finally {        
