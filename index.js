@@ -749,7 +749,7 @@ function __applyThinkingInjection(eventData) {
 }
 
 // NEW: Post-default multi-stage runner that updates ONLY the last assistant message
-async function __runPostDefaultMultiStage(stmBase, thinking_content, assistantIndex) {
+async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex) {
     const S = USER.tableBaseSetting || {};
     const enableNarration = S.enable_narration_stage !== false;
     const enableMain = S.enable_main_stage !== false;
@@ -758,7 +758,8 @@ async function __runPostDefaultMultiStage(stmBase, thinking_content, assistantIn
     let narrationTpl = enableNarration ? (S.narration_template || '').trim() : '';
     let mainTpl = enableMain ? (S.main_response_template || '').trim() : '';
     let longTermSummaryTpl = enableSummary ? (S.long_term_summary_template || '').trim() : '';
-
+    const { text } = __sanitizeDeepSeekOutput(thinking_raw, 'thinking');
+    let thinking_content = text || '';  
     const previousSummary = getLongTermSummary();
     applyReplaceInPlace(stmBase, /<thinking_instructions>[\s\S]*?<\/thinking_instructions>/gi, '');
 
