@@ -1598,7 +1598,8 @@ async function onMessageReceived(chat_id) {
     }
 
     const st = window.__stm_ms_state;
-    st.pendingMultiStage.stmBase.push(msg);
+    const assistantContent = `<previous_message>\n${msg.mes}\n</previous_message>`;
+    st.pendingMultiStage.stmBase.push({ role: 'assistant', content: assistantContent });
     if (!st.pendingMultiStage || !__hasAnyPriorUserMessage(idx)) {
         updateSheetsView();
         return;
