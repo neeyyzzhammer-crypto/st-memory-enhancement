@@ -192,7 +192,7 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
         console.error('[handleMainAPIRequest] generateRaw failed:', e);
         closeToastSafe();
         // Return explicit error string so caller can log and decide
-        return `错误: 主API调用失败: ${e?.message || e}`;
+        return '';
     }
 }
 
