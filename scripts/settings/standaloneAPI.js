@@ -127,169 +127,169 @@ async function createLoadingToast(isUseMainAPI = true, isSilent = false) {
  * @returns {Promise<string>} 生成的响应内容
  */
 
-export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = false) {
-    let suspended = false;
-    const closeToastSafe = () => { try { loadingToast?.close(); } catch { } loadingToast = null; };
-
-    // Show toast and await its decision up-front (prevents late race)
-    try {
-        if (!isSilent) {
-            loadingToast?.close();
-            loadingToast = new PopupConfirm();
-            const r = await loadingToast.show(
-                '正在使用【主API】重新生成完整表格...',
-                '后台继续',
-                '中止执行',
-            );
-            suspended = r;
-        } else {
-            suspended = false;
-        }
-    } catch { /* swallow UI errors */ }
-
-    // Progress text ticker (best-effort)
-    const startTime = Date.now();
-    if (loadingToast) {
-        loadingToast.frameUpdate(() => {
-            if (loadingToast) {
-                loadingToast.text = `正在使用【主API】重新生成完整表格: ${((Date.now() - startTime) / 1000).toFixed(1)}秒`;
-            }
-        });
-    }
-
-    const normalize = (r) => {
-        if (r === 'suspended') return 'suspended';
-        if (typeof r === 'string') return r;
-        if (r == null) return '';
-        try { return String(r); } catch { return ''; }
-    };
-
-    try {
-        if (Array.isArray(systemPrompt)) {
-            const messages = systemPrompt;
-            // single-message path
-            if (messages.length === 1 && typeof messages[0]?.content === 'string') {
-                const response = await EDITOR.generateRaw(messages[0].content, '', false, false, '');
-                const out = normalize(response)?.trim();
-                closeToastSafe();
-                return suspended ? 'suspended' : out;
-            }
-            // multi-message path: flatten
-            const flattened = messages.map(m => (typeof m?.content === 'string' ? `\n${m.content}` : '')).join('\n\n');
-            const response = await EDITOR.generateRaw(flattened, '', false, false, '');
-            const out = normalize(response)?.trim();
-            closeToastSafe();
-            return suspended ? 'suspended' : out;
-        } else {
-            const finalSystemPrompt = systemPrompt || '';
-            const finalUserPrompt = userPrompt || '';
-            const response = await EDITOR.generateRaw(finalUserPrompt, '', false, false, finalSystemPrompt);
-            const out = normalize(response)?.trim();
-            closeToastSafe();
-            return suspended ? 'suspended' : out;
-        }
-    } catch (e) {
-        console.error('[handleMainAPIRequest] generateRaw failed:', e);
-        closeToastSafe();
-        // Return explicit error string so caller can log and decide
-        return '';
-    }
-}
-
 //export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = false) {
-//    let finalSystemPrompt = '';
-//    let finalUserPrompt = '';
 //    let suspended = false;
+//    const closeToastSafe = () => { try { loadingToast?.close(); } catch { } loadingToast = null; };
 
-//    if (Array.isArray(systemPrompt)) {
-//        const messages = systemPrompt;
-
-//        // Normalize into array of strings for TavernHelper (step-style),
-//        // and separately into role/content objects for openai fallback.
-//        //const normalizedObjects = messages.map((m, idx) => {
-//        //    const role = (m && typeof m.role === 'string') ? m.role : 'user';
-//        //    const content2 = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
-            
-//        //    return { content: content2 };
-//        //});
-//        // UI toast
-//        createLoadingToast(true, isSilent).then((r) => {
-//            if (loadingToast) loadingToast.close();
+//    // Show toast and await its decision up-front (prevents late race)
+//    try {
+//        if (!isSilent) {
+//            loadingToast?.close();
+//            loadingToast = new PopupConfirm();
+//            const r = await loadingToast.show(
+//                '正在使用【主API】重新生成完整表格...',
+//                '后台继续',
+//                '中止执行',
+//            );
 //            suspended = r;
-//        });
-//        let startTime = Date.now();
-//        if (loadingToast) {
-//            loadingToast.frameUpdate(() => {
-//                if (loadingToast) {
-//                    loadingToast.text = `正在使用【主API】(多消息)重新生成完整表格: ${((Date.now() - startTime) / 1000).toFixed(1)}秒`;
-//                }
-//            });
+//        } else {
+//            suspended = false;
 //        }
+//    } catch { /* swallow UI errors */ }
+
+//    // Progress text ticker (best-effort)
+//    const startTime = Date.now();
+//    if (loadingToast) {
+//        loadingToast.frameUpdate(() => {
+//            if (loadingToast) {
+//                loadingToast.text = `正在使用【主API】重新生成完整表格: ${((Date.now() - startTime) / 1000).toFixed(1)}秒`;
+//            }
+//        });
+//    }
+
+//    const normalize = (r) => {
+//        if (r === 'suspended') return 'suspended';
+//        if (typeof r === 'string') return r;
+//        if (r == null) return '';
+//        try { return String(r); } catch { return ''; }
+//    };
+
+//    try {
+//        if (Array.isArray(systemPrompt)) {
+//            const messages = systemPrompt;
+//            // single-message path
+//            if (messages.length === 1 && typeof messages[0]?.content === 'string') {
+//                const response = await EDITOR.generateRaw(messages[0].content, '', false, false, '');
+//                const out = normalize(response)?.trim();
+//                closeToastSafe();
+//                return suspended ? 'suspended' : out;
+//            }
+//            // multi-message path: flatten
+//            const flattened = messages.map(m => (typeof m?.content === 'string' ? `\n${m.content}` : '')).join('\n\n');
+//            const response = await EDITOR.generateRaw(flattened, '', false, false, '');
+//            const out = normalize(response)?.trim();
+//            closeToastSafe();
+//            return suspended ? 'suspended' : out;
+//        } else {
+//            const finalSystemPrompt = systemPrompt || '';
+//            const finalUserPrompt = userPrompt || '';
+//            const response = await EDITOR.generateRaw(finalUserPrompt, '', false, false, finalSystemPrompt);
+//            const out = normalize(response)?.trim();
+//            closeToastSafe();
+//            return suspended ? 'suspended' : out;
+//        }
+//    } catch (e) {
+//        console.error('[handleMainAPIRequest] generateRaw failed:', e);
+//        closeToastSafe();
+//        // Return explicit error string so caller can log and decide
+//        return '';
+//    }
+//}
+
+export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = false) {
+    let finalSystemPrompt = '';
+    let finalUserPrompt = '';
+    let suspended = false;
+
+    if (Array.isArray(systemPrompt)) {
+        const messages = systemPrompt;
+
+        // Normalize into array of strings for TavernHelper (step-style),
+        // and separately into role/content objects for openai fallback.
+        //const normalizedObjects = messages.map((m, idx) => {
+        //    const role = (m && typeof m.role === 'string') ? m.role : 'user';
+        //    const content2 = (m && typeof m.content !== 'undefined') ? String(m.content) : '';
+            
+        //    return { content: content2 };
+        //});
+        // UI toast
+        createLoadingToast(true, isSilent).then((r) => {
+            if (loadingToast) loadingToast.close();
+            suspended = r;
+        });
+        let startTime = Date.now();
+        if (loadingToast) {
+            loadingToast.frameUpdate(() => {
+                if (loadingToast) {
+                    loadingToast.text = `正在使用【主API】(多消息)重新生成完整表格: ${((Date.now() - startTime) / 1000).toFixed(1)}秒`;
+                }
+            });
+        }
 
         
        
         
-//        // Fallbacks (no TavernHelper):
-//        // 1) Single-message array (multistage uses this): call EDITOR.generateRaw directly
-//        if (messages.length === 1 && typeof messages[0]?.content === 'string') {
-//            const response = await EDITOR.generateRaw(
-//                messages[0].content,
-//                '',
-//                false,
-//                false,
-//                '' // no system prompt in this path
-//            );
-//            loadingToast?.close();
-//            return suspended ? 'suspended' : response;
-//        }
+        // Fallbacks (no TavernHelper):
+        // 1) Single-message array (multistage uses this): call EDITOR.generateRaw directly
+        if (messages.length === 1 && typeof messages[0]?.content === 'string') {
+            const response = await EDITOR.generateRaw(
+                messages[0].content,
+                '',
+                false,
+                false,
+                '' // no system prompt in this path
+            );
+            loadingToast?.close();
+            return suspended ? 'suspended' : response;
+        }
 
-//        // 2) Multi-message array: flatten into one prompt and call EDITOR.generateRaw
-//        const flattened = messages
-//            .map(m => {                
-//                const content = typeof m?.content === 'string' ? m.content : '';
-//                return `\n${content}`;
-//            })
-//            .join('\n\n');
-//        const response = await EDITOR.generateRaw(
-//            flattened,
-//            '',
-//            false,
-//            false,
-//            '' // no system prompt in this path
-//        );
-//        loadingToast?.close();
-//        return suspended ? 'suspended' : response;
+        // 2) Multi-message array: flatten into one prompt and call EDITOR.generateRaw
+        const flattened = messages
+            .map(m => {                
+                const content = typeof m?.content === 'string' ? m.content : '';
+                return `\n${content}`;
+            })
+            .join('\n\n');
+        const response = await EDITOR.generateRaw(
+            flattened,
+            '',
+            false,
+            false,
+            '' // no system prompt in this path
+        );
+        loadingToast?.close();
+        return suspended ? 'suspended' : response;
 
-//    } else {
-//        // Original string-based path
-//        finalSystemPrompt = systemPrompt;
-//        finalUserPrompt = userPrompt;
+    } else {
+        // Original string-based path
+        finalSystemPrompt = systemPrompt;
+        finalUserPrompt = userPrompt;
 
-//        createLoadingToast(true, isSilent).then((r) => {
-//            if (loadingToast) loadingToast.close();
-//            suspended = r;
-//        });
+        createLoadingToast(true, isSilent).then((r) => {
+            if (loadingToast) loadingToast.close();
+            suspended = r;
+        });
 
-//        let startTime = Date.now();
-//        if (loadingToast) {
-//            loadingToast.frameUpdate(() => {
-//                if (loadingToast) {
-//                    loadingToast.text = `正在使用【主API】重新生成完整表格: ${((Date.now() - startTime) / 1000).toFixed(1)}秒`;
-//                }
-//            });
-//        }
+        let startTime = Date.now();
+        if (loadingToast) {
+            loadingToast.frameUpdate(() => {
+                if (loadingToast) {
+                    loadingToast.text = `正在使用【主API】重新生成完整表格: ${((Date.now() - startTime) / 1000).toFixed(1)}秒`;
+                }
+            });
+        }
 
-//        const response = await EDITOR.generateRaw(
-//            finalUserPrompt,
-//            '',
-//            false,
-//            false,
-//            finalSystemPrompt,
-//        );
-//        loadingToast?.close();
-//        return suspended ? 'suspended' : response;
-//    }
-//}
+        const response = await EDITOR.generateRaw(
+            finalUserPrompt,
+            '',
+            false,
+            false,
+            finalSystemPrompt,
+        );
+        loadingToast?.close();
+        return suspended ? 'suspended' : response;
+    }
+}
 //export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = false) {
 //    let finalSystemPrompt = '';
 //    let finalUserPrompt = '';
