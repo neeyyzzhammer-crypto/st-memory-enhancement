@@ -778,20 +778,26 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
         const tryMain = async () => {
             try {
                 const raw = await handleMainAPIRequest(messages, null, true);
-                return (raw === 'suspended' || typeof raw !== 'string') ? '' : raw.trim();
-            } catch { return ''; }
+                if (raw === 'suspended') { console.warn('[callStage] Main API suspended by user'); return ''; }
+                if (typeof raw !== 'string') { console.warn('[callStage] Main API returned non-string:', raw); return ''; }
+                return raw.trim();
+            } catch (e) {
+                console.error('[callStage] Main API exception:', e);
+                return '';
+            }
         };
         const tryCustom = async () => {
             try {
                 const raw = await handleCustomAPIRequest(messages, null, true, true);
-                return (raw === 'suspended' || typeof raw !== 'string') ? '' : raw.trim();
-            } catch { return ''; }
+                if (raw === 'suspended') { console.warn('[callStage] Custom API suspended by user'); return ''; }
+                if (typeof raw !== 'string') { console.warn('[callStage] Custom API returned non-string:', raw); return ''; }
+                return raw.trim();
+            } catch (e) {
+                console.error('[callStage] Custom API exception:', e);
+                return '';
+            }
         };
-        if (useMainAPI) {
-            let r = await tryMain(); if (!r) r = await tryCustom(); return r || '';
-        } else {
-            let r = await tryCustom(); if (!r) r = await tryMain(); return r || '';
-        }
+        return useMainAPI ? (await tryMain() || await tryCustom() || '') : (await tryCustom() || await tryMain() || '');
     }
 
     async function callStageWithRetry(stageName, payload, sanitizeStage) {
