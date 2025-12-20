@@ -832,9 +832,8 @@ function __promptBaseForStage(stmBase) {
         /<thinking_instructions>[\s\S]*?<\/thinking_instructions>/gi,
         /<main_instructions>[\s\S]*?<\/main_instructions>/gi,
         /<narration_instructions>[\s\S]*?<\/narration_instructions>/gi,
-        /<summary_instructions>[\s\S]*?<\/summary_instructions>/gi,
-        // optionally strip wrappers that shouldn’t go to the model
-        /<previous_message>[\s\S]*?<\/previous_message>/gi
+        /<summary_instructions>[\s\S]*?<\/summary_instructions>/gi
+        
     ];
     copy.forEach(m => {
         if (typeof m.content === 'string') {
@@ -932,7 +931,7 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
         ].filter(Boolean).join('\n\n');
         mainPrompt = __applyNameMacros(mainPrompt);
 
-        let mainPromptA = __promptCopy(stmBase);
+        let mainPromptA = __promptCopy(__promptBaseForStage(stmBase));
         __stripBlocksInPlace(mainPromptA, [
             'thinking_instructions',
             'main_instructions',
@@ -960,7 +959,7 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
         ].filter(Boolean).join('\n\n');
         narrationPrompt = __applyNameMacros(narrationPrompt);
 
-        let narrationPromptA = __promptCopy(stmBase);
+        let narrationPromptA = __promptCopy(__promptBaseForStage(stmBase));
         __stripBlocksInPlace(narrationPromptA, [
             'thinking_instructions',
             'main_instructions',
@@ -995,7 +994,7 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
         ].filter(Boolean).join('\n\n');
         summaryPrompt = __applyNameMacros(summaryPrompt);
 
-        let summaryPromptA = __promptCopy(stmBase);
+        let summaryPromptA = __promptCopy(__promptBaseForStage(stmBase));
         __stripBlocksInPlace(summaryPromptA, [
             'thinking_instructions',
             'main_instructions',
