@@ -708,10 +708,39 @@ const replaceInMessages = (msgs, regex, replacement = '') =>
         ...m,
         content: typeof m.content === 'string' ? m.content.replace(regex, replacement) : m.content
     }));
-const applyReplaceInPlace = (msgs, regex, replacement = '') =>
-    msgs.forEach(m => {
-        if (typeof m.content === 'string') m.content = m.content.replace(regex, replacement);
-    });
+const applyReplaceInPlace = (msgs, regex, replacement = '') => {
+    if (!msgs) return;
+
+    // If a single string was passed, just return the cleaned string (no mutation)
+    if (typeof msgs === 'string') {
+        return msgs.replace(regex, replacement);
+    }
+
+    // If an array of messages was passed, mutate in place
+    if (Array.isArray(msgs)) {
+        msgs.forEach(m => {
+            if (!m) return;
+            if (typeof m.content === 'string') {
+                m.content = m.content.replace(regex, replacement);
+            }
+            // Also clean assistant/user content stored in `mes`
+            if (typeof m.mes === 'string') {
+                m.mes = m.mes.replace(regex, replacement);
+            }
+        });
+        return msgs;
+    }
+
+    // If an object-like single message was passed, mutate both `content` and `mes`
+    if (typeof msgs === 'object') {
+        if (typeof msgs.content === 'string') {
+            msgs.content = msgs.content.replace(regex, replacement);
+        }
+        if (typeof msgs.mes === 'string') {
+            msgs.mes = msgs.mes.replace(regex, replacement);
+        }
+    }
+};
 
 
 // NEW: Inject only thinking content into the prompt we send to the LLM (no cancellation)
@@ -731,9 +760,9 @@ function __applyThinkingInjection(eventData) {
         for (let i = eventData.chat.length - 1; i >= 0; i--) {
             if (eventData.chat[i]?.role === 'user') { lastUserIdx = i; break; }
         }
-        applyReplaceInPlace(eventData.chat, /<_beat>[\s\S]*?<\/_beat>/gi, '');
-        applyReplaceInPlace(eventData.chat, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
-        applyReplaceInPlace(eventData.chat, /<_sex>[\s\S]*?<\/_sex>/gi, '');
+        //applyReplaceInPlace(eventData.chat, /<_beat>[\s\S]*?<\/_beat>/gi, '');
+        //applyReplaceInPlace(eventData.chat, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
+        //applyReplaceInPlace(eventData.chat, /<_sex>[\s\S]*?<\/_sex>/gi, '');
         const wrapped = `<thinking_instructions>\n${thinkingContent.trim()}\n</thinking_instructions>`;
 
         if (lastUserIdx !== -1) {
@@ -846,7 +875,7 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
             appendBlockToAssistant(assistantIndex, 'main', mainResp, { triggerTableEdit: true });
         }
     }
-
+    applyReplaceInPlace(stmBase, /<main_instructions>[\s\S]*?<\/main_instructions>/gi, '');
     // NARRATION
     let narrationResp = '';
     if (narrationTpl) {
@@ -866,7 +895,7 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
         narrationResp = text;
         appendBlockToAssistant(assistantIndex, 'narration', narrationResp || '(no narration)', { triggerTableEdit: false });
     }
-
+    applyReplaceInPlace(stmBase, /<narration_instructions>[\s\S]*?<\/narration_instructions>/gi, '');
     // SUMMARY (store only)
     if (longTermSummaryTpl) {
         const ui = __getLastUserMessageIndex();
@@ -1710,12 +1739,15 @@ async function onChatCompletionPromptReady(eventData) {
  * - Functions, DOM Nodes, and Window are returned by reference.
  */
 function __deepCopyChat(chat) {
-    try {
-        if (typeof structuredClone === 'function') {
-            return structuredClone(chat);
-        }
-    } catch (_) { /* ignore and use fallback */ }
-    return __deepCloneFallback(chat);
+    if (!Array.isArray(chat)) return [];
+    return chat.map(m => {
+        const role = m?.role || (m?.is_user ? 'user' : (m?.is_system ? 'system' : 'assistant'));
+        // Prefer explicit `content`, fall back to `mes`, ensure string
+        const raw = typeof m?.content === 'string'
+            ? m.content
+            : (typeof m?.mes === 'string' ? m.mes : '');
+        return { role, content: raw };
+    });
 }
 
 function __deepCloneFallback(value, seen = new WeakMap()) {
