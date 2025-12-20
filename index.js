@@ -777,6 +777,33 @@ function __applyThinkingInjection(eventData) {
     }
 }
 
+function __toPromptChat(chat) {
+    if (!Array.isArray(chat)) return [];
+    return chat.map(m => {
+        const role = m?.role || (m?.is_user ? 'user' : (m?.is_system ? 'system' : 'assistant'));
+        const raw = typeof m?.content === 'string' ? m.content : (typeof m?.mes === 'string' ? m.mes : '');
+        return { role, content: raw };
+    });
+}
+// Return a cleaned copy of stmBase with stage-specific blocks removed
+function __promptBaseForStage(stmBase) {
+    const copy = __toPromptChat(stmBase);
+    const strip = [
+        /<thinking_instructions>[\s\S]*?<\/thinking_instructions>/gi,
+        /<main_instructions>[\s\S]*?<\/main_instructions>/gi,
+        /<narration_instructions>[\s\S]*?<\/narration_instructions>/gi,
+        /<summary_instructions>[\s\S]*?<\/summary_instructions>/gi,
+        // optionally strip wrappers that shouldn’t go to the model
+        /<previous_message>[\s\S]*?<\/previous_message>/gi
+    ];
+    copy.forEach(m => {
+        if (typeof m.content === 'string') {
+            strip.forEach(rx => { m.content = m.content.replace(rx, ''); });
+        }
+    });
+    return copy;
+}
+
 // NEW: Post-default multi-stage runner that updates ONLY the last assistant message
 async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex) {
     const S = USER.tableBaseSetting || {};
@@ -865,7 +892,7 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
         ].filter(Boolean).join('\n\n');
         mainPrompt = __applyNameMacros(mainPrompt);
 
-        let mainPromptA = __deepCopyChat(stmBase);
+        let mainPromptA = __promptBaseForStage(stmBase);
         mainPromptA.push({ role: 'system', content: `<main_instructions>\n${mainPrompt}\n</main_instructions>` });
 
         //applyReplaceInPlace(mainPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
@@ -887,7 +914,7 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
         ].filter(Boolean).join('\n\n');
         narrationPrompt = __applyNameMacros(narrationPrompt);
 
-        let narrationPromptA = __deepCopyChat(stmBase);
+        let narrationPromptA = __promptBaseForStage(stmBase);
         narrationPromptA.push({ role: 'system', content: `<narration_instructions>\n${narrationPrompt}\n</narration_instructions>` });
 
         applyReplaceInPlace(narrationPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
@@ -916,7 +943,7 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
         ].filter(Boolean).join('\n\n');
         summaryPrompt = __applyNameMacros(summaryPrompt);
 
-        let summaryPromptA = __deepCopyChat(stmBase);
+        let summaryPromptA = __promptBaseForStage(stmBase);
         summaryPromptA.push({ role: 'system', content: `<summary_instructions>\n${summaryPrompt}\n</summary_instructions>` });
 
         applyReplaceInPlace(summaryPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
@@ -934,8 +961,11 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
         });
     }
 
+    // At the end of __runPostDefaultMultiStage:
     try { await ctx.saveChat?.(); } catch { }
     try { await updateSheetsView(assistantIndex); } catch { }
+    // Reset state to avoid accumulation on next assistant message
+    window.__stm_ms_state.pendingMultiStage = null;
 }
 // Build RAG "past events" text for current user message
 async function __buildPastEventsFromRag(eventData) {
@@ -1706,7 +1736,7 @@ async function onChatCompletionPromptReady(eventData) {
         eventData.chat.push({ role: 'system', content: `<memory>\n${promptContent}\n</memory>` });
 
         // NEW: prepare stmBase (before thinking sanitizes chat) and arm pendingMultiStage here (once)
-        let stmBase = __deepCopyChat(eventData.chat);
+        let stmBase = __toPromptChat(eventData.chat);
         // Inject THINKING into outgoing chat for default LLM
         __applyThinkingInjection(eventData);     
         
