@@ -776,7 +776,47 @@ function __applyThinkingInjection(eventData) {
         console.warn('[ThinkingInjection] Failed to inject thinking content:', e);
     }
 }
-
+// Remove all occurrences of specific XML-like blocks by tag names (no regex)
+function __stripBlocksInPlace(messages, tags) {
+    if (!Array.isArray(messages)) return;
+    const normTags = Array.isArray(tags) ? tags : [tags];
+    const removeTag = (text, tag) => {
+        if (typeof text !== 'string' || !text) return text;
+        const openTag = `<${tag}>`;
+        const closeTag = `</${tag}>`;
+        let start = text.indexOf(openTag);
+        // Remove all occurrences
+        while (start !== -1) {
+            const end = text.indexOf(closeTag, start + openTag.length);
+            if (end === -1) break; // malformed; stop to avoid infinite loop
+            text = text.slice(0, start) + text.slice(end + closeTag.length);
+            start = text.indexOf(openTag);
+        }
+        return text;
+    };
+    messages.forEach(m => {
+        if (!m) return;
+        if (typeof m.content === 'string') {
+            normTags.forEach(tag => { m.content = removeTag(m.content, tag); });
+        }
+        if (typeof m.mes === 'string') {
+            normTags.forEach(tag => { m.mes = removeTag(m.mes, tag); });
+        }
+    });
+}
+// Strict prompt copy: only role + string content, no shared references
+function __promptCopy(chat) {
+    if (!Array.isArray(chat)) return [];
+    return chat.map(m => {
+        const role = m?.role || (m?.is_user ? 'user' : (m?.is_system ? 'system' : 'assistant'));
+        let raw = '';
+        if (typeof m?.content === 'string') raw = m.content;
+        else if (typeof m?.mes === 'string') raw = m.mes;
+        // Force a new string instance
+        raw = (raw != null ? ('' + raw) : '');
+        return { role, content: raw };
+    });
+}
 function __toPromptChat(chat) {
     if (!Array.isArray(chat)) return [];
     return chat.map(m => {
@@ -817,7 +857,7 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
     const { text } = __sanitizeDeepSeekOutput(thinking_raw, 'thinking');
     let thinking_content = text || '';  
     const previousSummary = getLongTermSummary();
-    applyReplaceInPlace(stmBase, /<thinking_instructions>[\s\S]*?<\/thinking_instructions>/gi, '');
+    /*applyReplaceInPlace(stmBase, /<thinking_instructions>[\s\S]*?<\/thinking_instructions>/gi, '');*/
 
     const expand = (tpl, ctx) => (tpl || '')
         .replace(/{{narration}}/g, ctx.narration || '')
@@ -892,7 +932,14 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
         ].filter(Boolean).join('\n\n');
         mainPrompt = __applyNameMacros(mainPrompt);
 
-        let mainPromptA = __promptBaseForStage(stmBase);
+        let mainPromptA = __promptCopy(stmBase);
+        __stripBlocksInPlace(mainPromptA, [
+            'thinking_instructions',
+            'main_instructions',
+            'narration_instructions',
+            'summary_instructions',
+            'previous_message'
+        ]);
         mainPromptA.push({ role: 'system', content: `<main_instructions>\n${mainPrompt}\n</main_instructions>` });
 
         //applyReplaceInPlace(mainPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
@@ -902,7 +949,7 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
             appendBlockToAssistant(assistantIndex, 'main', mainResp, { triggerTableEdit: true });
         }
     }
-    applyReplaceInPlace(stmBase, /<main_instructions>[\s\S]*?<\/main_instructions>/gi, '');
+    
     // NARRATION
     let narrationResp = '';
     if (narrationTpl) {
@@ -914,7 +961,14 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
         ].filter(Boolean).join('\n\n');
         narrationPrompt = __applyNameMacros(narrationPrompt);
 
-        let narrationPromptA = __promptBaseForStage(stmBase);
+        let narrationPromptA = __promptCopy(stmBase);
+        __stripBlocksInPlace(narrationPromptA, [
+            'thinking_instructions',
+            'main_instructions',
+            'narration_instructions',
+            'summary_instructions',
+            'previous_message'
+        ]);
         narrationPromptA.push({ role: 'system', content: `<narration_instructions>\n${narrationPrompt}\n</narration_instructions>` });
 
         applyReplaceInPlace(narrationPromptA, /<_sexd>[\s\S]*?<\/_sexd>/gi, '');
@@ -922,7 +976,7 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
         narrationResp = text;
         appendBlockToAssistant(assistantIndex, 'narration', narrationResp || '(no narration)', { triggerTableEdit: false });
     }
-    applyReplaceInPlace(stmBase, /<narration_instructions>[\s\S]*?<\/narration_instructions>/gi, '');
+    
     // SUMMARY (store only)
     if (longTermSummaryTpl) {
         const ui = __getLastUserMessageIndex();
@@ -943,7 +997,14 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
         ].filter(Boolean).join('\n\n');
         summaryPrompt = __applyNameMacros(summaryPrompt);
 
-        let summaryPromptA = __promptBaseForStage(stmBase);
+        let summaryPromptA = __promptCopy(stmBase);
+        __stripBlocksInPlace(summaryPromptA, [
+            'thinking_instructions',
+            'main_instructions',
+            'narration_instructions',
+            'summary_instructions',
+            'previous_message'
+        ]);
         summaryPromptA.push({ role: 'system', content: `<summary_instructions>\n${summaryPrompt}\n</summary_instructions>` });
 
         applyReplaceInPlace(summaryPromptA, /<_beat>[\s\S]*?<\/_beat>/gi, '');
@@ -1736,7 +1797,7 @@ async function onChatCompletionPromptReady(eventData) {
         eventData.chat.push({ role: 'system', content: `<memory>\n${promptContent}\n</memory>` });
 
         // NEW: prepare stmBase (before thinking sanitizes chat) and arm pendingMultiStage here (once)
-        let stmBase = __toPromptChat(eventData.chat);
+        let stmBase = __promptCopy(eventData.chat);
         // Inject THINKING into outgoing chat for default LLM
         __applyThinkingInjection(eventData);     
         
