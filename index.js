@@ -937,8 +937,7 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
             'thinking_instructions',
             'main_instructions',
             'narration_instructions',
-            'summary_instructions',
-            'previous_message'
+            'summary_instructions'
         ]);
         mainPromptA.push({ role: 'system', content: `<main_instructions>\n${mainPrompt}\n</main_instructions>` });
 
@@ -966,8 +965,7 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
             'thinking_instructions',
             'main_instructions',
             'narration_instructions',
-            'summary_instructions',
-            'previous_message'
+            'summary_instructions'
         ]);
         narrationPromptA.push({ role: 'system', content: `<narration_instructions>\n${narrationPrompt}\n</narration_instructions>` });
 
@@ -1002,8 +1000,7 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
             'thinking_instructions',
             'main_instructions',
             'narration_instructions',
-            'summary_instructions',
-            'previous_message'
+            'summary_instructions'
         ]);
         summaryPromptA.push({ role: 'system', content: `<summary_instructions>\n${summaryPrompt}\n</summary_instructions>` });
 
