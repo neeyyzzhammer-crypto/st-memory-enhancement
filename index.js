@@ -1961,9 +1961,9 @@ function getLatestAssistantCriticalThinkingSection() {
 }
 const __applyNameMacros = (s) => {
     const { userName, charName } = getCurrentChatNames();
-    return s
-        .replace(/{{user}}/gi, userName)
-        .replace(/{{char}}/gi, charName);
+    return s;
+       // .replace(/{{user}}/gi, userName)
+       // .replace(/{{char}}/gi, charName);
 };
 // PATCH: enhance thinking data to support multi previous critical thinking sections (CRM setting)
 function initThinkingData(eventData) {
