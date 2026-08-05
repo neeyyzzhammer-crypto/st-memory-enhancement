@@ -785,7 +785,7 @@ function __stripBlocksInPlace(messages, tags) {
         // Matches <tag> or </tag> globally
 // Matches <tag>, followed by anything (including newlines) non-greedily, up to </tag>
 const regex = new RegExp(`<${tag}>[\\s\\S]*?<\\/${tag}>`, 'g');
-text = text.replace(regex, '');
+text = text.replace(regex, ' ');
 text = text +'stradevin';
 
         return text;
