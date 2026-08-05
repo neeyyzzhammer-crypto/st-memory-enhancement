@@ -854,13 +854,14 @@ async function __runPostDefaultMultiStage(stmBase, thinking_raw, assistantIndex)
     const previousSummary = getLongTermSummary();
     /*applyReplaceInPlace(stmBase, /<thinking_instructions>[\s\S]*?<\/thinking_instructions>/gi, '');*/
 
-    const expand = (tpl, ctx) => (tpl || '')
+    const expand = (tpl, ctx) => {
+        return (tpl || '')
         .replace(/{{narration}}/g, ctx.narration || '')
         .replace(/{{thinking}}/g, ctx.thinking || '')
         .replace(/{{main}}/g, ctx.main || '')
         .replace(/{{previous_summary}}/g, ctx.previous_summary || '')
         .replace(/{{summary}}/g, ctx.summary || '');
-
+                                 };
     // NEW: cap retries via setting (default 1 to prevent 3-4 extra calls)
     const maxAttemptsSetting = 5;
 
@@ -1961,9 +1962,9 @@ function getLatestAssistantCriticalThinkingSection() {
 }
 const __applyNameMacros = (s) => {
     const { userName, charName } = getCurrentChatNames();
-    return s;
-       // .replace(/{{user}}/gi, userName)
-       // .replace(/{{char}}/gi, charName);
+    return s
+        .replace(/{{user}}/gi, userName)
+        .replace(/{{char}}/gi, charName);
 };
 // PATCH: enhance thinking data to support multi previous critical thinking sections (CRM setting)
 function initThinkingData(eventData) {
