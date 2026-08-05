@@ -250,13 +250,9 @@ export async function handleMainAPIRequest(systemPrompt, userPrompt, isSilent = 
                 return `\n${content}`;
             })
             .join('\n\n');
-        const response = await EDITOR.generateRaw(
-            flattened,
-            '',
-            false,
-            false,
-            '' // no system prompt in this path
-        );
+        const params = { prompt: flattened, systemPrompt: '' };
+        
+        const response = await EDITOR.generateRaw(params);
         loadingToast?.close();
         return suspended ? 'suspended' : response;
 
