@@ -782,16 +782,12 @@ function __stripBlocksInPlace(messages, tags) {
     const normTags = Array.isArray(tags) ? tags : [tags];
     const removeTag = (text, tag) => {
         if (typeof text !== 'string' || !text) return text;
-        const openTag = `<${tag}>`;
-        const closeTag = `</${tag}>`;
-        let start = text.indexOf(openTag);
-        // Remove all occurrences
-        while (start !== -1) {
-            const end = text.indexOf(closeTag, start + openTag.length);
-            if (end === -1) break; // malformed; stop to avoid infinite loop
-            text = text.slice(0, start) + text.slice(end + closeTag.length);
-            start = text.indexOf(openTag);
-        }
+        // Matches <tag> or </tag> globally
+// Matches <tag>, followed by anything (including newlines) non-greedily, up to </tag>
+const regex = new RegExp(`<${tag}>[\\s\\S]*?<\\/${tag}>`, 'g');
+text = text.replace(regex, '');
+
+
         return text;
     };
     messages.forEach(m => {
